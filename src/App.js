@@ -6,7 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 //  ⚙️  CONFIGURAÇÃO SUPABASE
 // ============================================================
 const SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── THEME ───────────────────────────────────────────────────
@@ -17,9 +17,22 @@ const T = {
   text:"#F1F5F9",muted:"#64748B",sub:"#94A3B8",
 };
 
-// ─── HELPERS ─────────────────────────────────────────────────
-function getSegments(){try{const s=localStorage.getItem("krcf_segments");return s?JSON.parse(s):["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"];}catch{return["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"];}}
-function getOrigins(){try{const s=localStorage.getItem("krcf_origins");return s?JSON.parse(s):["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro"];}catch{return["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro"];}}
+// ─── GLOBAL LISTS CONTEXT ────────────────────────────────────
+const ListsContext = React.createContext({ segments:[], origins:[], reload:()=>{} });
+function useLists(){ return React.useContext(ListsContext); }
+function ListsProvider({ children }){
+  const[segments,setSegments]=useState([]);
+  const[origins,setOrigins]=useState([]);
+  const reload=useCallback(async()=>{
+    const[s,o]=await Promise.all([supabase.from("segments").select("*").order("name"),supabase.from("origins").select("*").order("name")]);
+    setSegments((s.data||[]).map(x=>x.name));
+    setOrigins((o.data||[]).map(x=>x.name));
+  },[]);
+  useEffect(()=>{reload();},[reload]);
+  return React.createElement(ListsContext.Provider,{value:{segments,origins,reload}},children);
+}
+function getSegments(){return["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"];}
+function getOrigins(){return["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro"];}
 
 const STATUS_OPTIONS=["Lead","Em contato","Sem contato","Whats","Caixa Postal","Telefone não existe"];
 const STATUS_COLORS={"Lead":T.accent,"Em contato":T.green,"Sem contato":T.muted,"Whats":T.purple,"Caixa Postal":T.yellow,"Telefone não existe":T.red};
@@ -48,7 +61,7 @@ function Input({label,value,onChange,type="text",options,style,required,placehol
       {label&&<div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>{label}{required&&<span style={{color:T.red}}> *</span>}</div>}
       {options?<select style={s} value={value} onChange={e=>onChange(e.target.value)}><option value="">Selecione...</option>{options.map(o=><option key={o} value={o}>{o}</option>)}</select>
       :<input style={s} type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} min={min} max={max}/>}
-    </div>
+    </div></ListsProvider>
   );
 }
 function Modal({open,title,onClose,children,width=520}){
@@ -153,6 +166,7 @@ function Login({onLogin}){
 
 // ─── DASHBOARD ───────────────────────────────────────────────
 function Dashboard({user,profiles,onNav}){
+  const{origins:allOrigins}=useLists();
   const[calls,setCalls]=useState([]);const[clients,setClients]=useState([]);
   const[followups,setFollowups]=useState([]);const[goals,setGoals]=useState([]);const[loading,setLoading]=useState(true);
   const[volFilter,setVolFilter]=useState("week");const[goalFilter,setGoalFilter]=useState("day");
@@ -181,7 +195,7 @@ function Dashboard({user,profiles,onNav}){
     const dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
     volData=Array.from({length:dim},(_,i)=>{const k=`${now.toISOString().slice(0,7)}-${String(i+1).padStart(2,"0")}`;return{name:String(i+1),Ligações:myCalls.filter(c=>c.date===k).length};});
   }
-  const originsData=getOrigins().map(o=>({name:o,value:myCalls.filter(c=>clients.find(cl=>cl.id===c.client_id)?.origin===o).length})).filter(d=>d.value>0);
+  const originsData=allOrigins.map(o=>({name:o,value:myCalls.filter(c=>clients.find(cl=>cl.id===c.client_id)?.origin===o).length})).filter(d=>d.value>0);
   const period=now.toISOString().slice(0,7);
   const sellers=profiles.filter(p=>p.role==="vendedor");
   const teamGoals=sellers.map(s=>goals.find(g=>g.user_id===s.id&&g.period===period)).filter(Boolean);
@@ -261,6 +275,7 @@ function Dashboard({user,profiles,onNav}){
 
 // ─── CLIENTS ─────────────────────────────────────────────────
 function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
+  const{segments,origins}=useLists();
   const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);const[edit,setEdit]=useState(null);
   const[search,setSearch]=useState("");const[fStatus,setFStatus]=useState("");const[fSeg,setFSeg]=useState("");const[fOrigin,setFOrigin]=useState("");const[fResp,setFResp]=useState("");
@@ -306,10 +321,10 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
           <option value="">Status</option>{STATUS_OPTIONS.map(s=><option key={s}>{s}</option>)}
         </select>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fSeg} onChange={e=>setFSeg(e.target.value)}>
-          <option value="">Segmento</option>{getSegments().map(s=><option key={s}>{s}</option>)}
+          <option value="">Segmento</option>{segments.map(s=><option key={s}>{s}</option>)}
         </select>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fOrigin} onChange={e=>setFOrigin(e.target.value)}>
-          <option value="">Origem</option>{getOrigins().map(o=><option key={o}>{o}</option>)}
+          <option value="">Origem</option>{origins.map(o=><option key={o}>{o}</option>)}
         </select>
         {user.role!=="vendedor"&&<select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fResp} onChange={e=>setFResp(e.target.value)}>
           <option value="">Responsável</option>{sellers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
@@ -360,8 +375,8 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
           <Input label="E-mail" value={form.email} onChange={v=>setForm(f=>({...f,email:v}))} type="email"/>
           <Input label="Cidade" value={form.city} onChange={v=>setForm(f=>({...f,city:v}))}/>
           <Input label="Estado" value={form.state} onChange={v=>setForm(f=>({...f,state:v}))}/>
-          <Input label="Segmento" value={form.segment} onChange={v=>setForm(f=>({...f,segment:v}))} options={getSegments()}/>
-          <Input label="Origem" value={form.origin} onChange={v=>setForm(f=>({...f,origin:v}))} options={getOrigins()}/>
+          <Input label="Segmento" value={form.segment} onChange={v=>setForm(f=>({...f,segment:v}))} options={segments}/>
+          <Input label="Origem" value={form.origin} onChange={v=>setForm(f=>({...f,origin:v}))} options={origins}/>
           <Input label="Status" value={form.status} onChange={v=>setForm(f=>({...f,status:v}))} options={STATUS_OPTIONS}/>
           {user.role!=="vendedor"&&<div style={{marginBottom:14}}><div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Responsável</div>
             <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,width:"100%"}} value={form.responsible} onChange={e=>setForm(f=>({...f,responsible:e.target.value}))}>
@@ -817,32 +832,51 @@ function Goals({user,profiles}){
 }
 
 // ─── EDITABLE LIST ───────────────────────────────────────────
-function EditableList({title,storageKey,color,icon}){
-  const def=storageKey==="krcf_segments"?["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"]:["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro"];
-  const[items,setItems]=React.useState(()=>{try{const s=localStorage.getItem(storageKey);return s?JSON.parse(s):def;}catch{return def;}});
-  const[newItem,setNewItem]=React.useState("");const[editIdx,setEditIdx]=React.useState(null);const[editVal,setEditVal]=React.useState("");
-  React.useEffect(()=>{localStorage.setItem(storageKey,JSON.stringify(items));},[items,storageKey]);
-  function add(){const v=newItem.trim();if(!v)return;if(items.includes(v))return alert("Item já existe!");setItems(i=>[...i,v]);setNewItem("");}
-  function remove(idx){if(!confirm(`Remover "${items[idx]}"?`))return;setItems(i=>i.filter((_,k)=>k!==idx));}
-  function startEdit(idx){setEditIdx(idx);setEditVal(items[idx]);}
-  function saveEdit(){const v=editVal.trim();if(!v)return;setItems(i=>i.map((item,k)=>k===editIdx?v:item));setEditIdx(null);}
+function EditableList({title,table,color,icon}){
+  const{reload}=useLists();
+  const[items,setItems]=useState([]);
+  const[newItem,setNewItem]=useState("");
+  const[editId,setEditId]=useState(null);
+  const[editVal,setEditVal]=useState("");
+  const loadItems=useCallback(async()=>{
+    const{data}=await supabase.from(table).select("*").order("name");
+    setItems(data||[]);
+  },[table]);
+  useEffect(()=>{loadItems();},[loadItems]);
+  async function add(){
+    const v=newItem.trim();if(!v)return;
+    const{error}=await supabase.from(table).insert({name:v});
+    if(error)return alert("Erro: item já existe ou sem permissão.");
+    setNewItem("");await loadItems();await reload();
+  }
+  async function remove(item){
+    if(!confirm(`Remover "${item.name}"?`))return;
+    await supabase.from(table).delete().eq("id",item.id);
+    await loadItems();await reload();
+  }
+  async function saveEdit(){
+    const v=editVal.trim();if(!v)return;
+    await supabase.from(table).update({name:v}).eq("id",editId);
+    setEditId(null);await loadItems();await reload();
+  }
   return(
     <Card>
       <div style={{fontSize:13,fontWeight:700,color:T.sub,marginBottom:16}}>{icon} {title}</div>
       <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:20}}>
-        {items.map((item,idx)=>(
-          <div key={idx} style={{display:"flex",alignItems:"center",gap:8,background:T.surface,borderRadius:8,padding:"8px 12px",border:`1px solid ${T.border}`}}>
-            {editIdx===idx?<><input autoFocus style={{flex:1,background:"transparent",border:"none",color:T.text,fontSize:13,fontFamily:"inherit",outline:"none"}} value={editVal} onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditIdx(null);}}/><Btn size="sm" onClick={saveEdit}>✓ Salvar</Btn><Btn size="sm" variant="ghost" onClick={()=>setEditIdx(null)}>✕</Btn></>
-            :<><span style={{flex:1,color:T.text,fontSize:13}}>{item}</span><button onClick={()=>startEdit(idx)} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:15,padding:"2px 6px"}}>✏️</button><button onClick={()=>remove(idx)} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:15,padding:"2px 6px"}}>🗑</button></>}
+        {items.map((item)=>(
+          <div key={item.id} style={{display:"flex",alignItems:"center",gap:8,background:T.surface,borderRadius:8,padding:"8px 12px",border:`1px solid ${T.border}`}}>
+            {editId===item.id
+              ?<><input autoFocus style={{flex:1,background:"transparent",border:"none",color:T.text,fontSize:13,fontFamily:"inherit",outline:"none"}} value={editVal} onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditId(null);}}/><Btn size="sm" onClick={saveEdit}>✓ Salvar</Btn><Btn size="sm" variant="ghost" onClick={()=>setEditId(null)}>✕</Btn></>
+              :<><span style={{flex:1,color:T.text,fontSize:13}}>{item.name}</span><button onClick={()=>{setEditId(item.id);setEditVal(item.name);}} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:15,padding:"2px 6px"}}>✏️</button><button onClick={()=>remove(item)} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:15,padding:"2px 6px"}}>🗑</button></>}
           </div>
         ))}
         {items.length===0&&<div style={{color:T.muted,fontSize:13,textAlign:"center",padding:16}}>Nenhum item cadastrado.</div>}
       </div>
       <div style={{display:"flex",gap:8}}>
-        <input style={{flex:1,background:T.surface,border:`1px solid ${color}40`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,fontFamily:"inherit",outline:"none"}} placeholder={`+ Novo ${title.toLowerCase()}...`} value={newItem} onChange={e=>setNewItem(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")add();}}/>
+        <input style={{flex:1,background:T.surface,border:`1px solid ${color}40`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,fontFamily:"inherit",outline:"none"}} placeholder={`+ Novo...`} value={newItem} onChange={e=>setNewItem(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")add();}}/>
         <Btn onClick={add} disabled={!newItem.trim()}>Adicionar</Btn>
       </div>
-      <div style={{color:T.muted,fontSize:11,marginTop:8}}>💡 Pressione Enter para adicionar rapidamente</div>
+      <div style={{color:T.muted,fontSize:11,marginTop:8}}>💡 As alterações refletem para todos os usuários imediatamente</div>
     </Card>
   );
 }
@@ -876,8 +910,8 @@ function Settings({user,profiles,loadProfiles}){
           </table>
         </Card>
       </>}
-      {tab==="segments"&&<EditableList title="Segmentos" storageKey="krcf_segments" color={T.accent} icon="🗂"/>}
-      {tab==="origins"&&<EditableList title="Origens de Leads" storageKey="krcf_origins" color={T.purple} icon="🌐"/>}
+      {tab==="segments"&&<EditableList title="Segmentos" table="segments" color={T.accent} icon="🗂"/>}
+      {tab==="origins"&&<EditableList title="Origens de Leads" table="origins" color={T.purple} icon="🌐"/>}
       <Modal open={modal} title="Criar Novo Usuário" onClose={()=>setModal(false)}>
         <Input label="Nome completo" value={form.name} onChange={v=>setForm(f=>({...f,name:v}))} required/>
         <Input label="E-mail" value={form.email} onChange={v=>setForm(f=>({...f,email:v}))} type="email" required/>
@@ -932,7 +966,7 @@ export default function App(){
   async function logout(){await supabase.auth.signOut();setAuthUser(null);}
   const preClient=quickTarget===page?quickClient:null;
   return(
-    <div style={{minHeight:"100vh",background:T.bg,fontFamily:"'DM Sans','Inter',system-ui,sans-serif",color:T.text,display:"flex"}}>
+    <ListsProvider><div style={{minHeight:"100vh",background:T.bg,fontFamily:"'DM Sans','Inter',system-ui,sans-serif",color:T.text,display:"flex"}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} *{box-sizing:border-box}`}</style>
       <div style={{width:220,background:T.surface,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh"}}>
         <div style={{padding:"22px 20px 16px",borderBottom:`1px solid ${T.border}`}}>
