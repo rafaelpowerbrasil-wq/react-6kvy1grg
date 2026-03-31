@@ -194,7 +194,7 @@ function Dashboard({user,profiles,onNav}){
   const effective=myCalls.filter(c=>c.type==="Atendida").length;
   const convRate=myCalls.length>0?Math.round((effective/myCalls.length)*100):0;
   const [dashClients,setDashClients]=useState([]);
-  const [dashActs,setDashActs]=useState([]);
+  const [dashActs,setDashActs]=useState(new Set());
   useEffect(()=>{
     async function loadExtra(){
       const[{data:cl},{data:ca},{data:wh},{data:fu},{data:mt}]=await Promise.all([
@@ -522,7 +522,7 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
             {["Nome","Telefone","Dias Cadastro","Último Contato","Segmento","Status","Acionamentos","Responsável",""].map(h=><th key={h} style={{padding:"10px 12px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:11,borderBottom:`1px solid ${T.border}`}}>{h}</th>)}
           </tr></thead>
           <tbody>
-            {visible.length===0&&<tr><td colSpan={8} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhum cliente encontrado.</td></tr>}
+            {visible.length===0&&<tr><td colSpan={9} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhum cliente encontrado.</td></tr>}
             {visible.map(c=>(
               <tr key={c.id} style={{borderBottom:`1px solid ${T.border}15`}}>
                 <td style={{padding:"10px 12px"}}>
@@ -897,16 +897,15 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
 // ─── GOALS ───────────────────────────────────────────────────
 function GoalCategoryCard({categoryLabel,categoryTitle,color,todayReal,todayMeta,weekReal,weekMeta,monthReal,monthMeta}){
   return(
-    <Card style={{flex:1,minWidth:250}}>
+    <Card style={{flex:1,minWidth:220}}>
       <div style={{fontSize:11,fontWeight:700,color,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{categoryLabel}</div>
-      <div style={{fontSize:16,fontWeight:800,color:T.text,marginBottom:16}}>{categoryTitle}</div>
-      <div style={{display:"flex",gap:10,justifyContent:"space-around",alignItems:"flex-start"}}>
+      <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:14}}>{categoryTitle}</div>
+      <div style={{display:"flex",gap:8,justifyContent:"space-around",alignItems:"flex-start",flexWrap:"wrap"}}>
         {[{label:"Hoje",real:todayReal,meta:todayMeta},{label:"Semana",real:weekReal,meta:weekMeta},{label:"Mês",real:monthReal,meta:monthMeta}].map(({label,real,meta})=>(
-          <div key={label} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:8}}>
-            <DonutRing real={real} meta={meta} color={color} size={label==="Hoje"?108:88}/>
-            <div style={{fontSize:12,fontWeight:700,color:T.sub}}>{label}</div>
-            <div style={{fontSize:10,color:T.muted}}>Meta/{label==="Hoje"?"Dia":label}</div>
-            <div style={{fontSize:14,fontWeight:800,color:T.text}}>{meta}</div>
+          <div key={label} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:6}}>
+            <DonutRing real={real||0} meta={meta||1} color={color} size={label==="Hoje"?100:82}/>
+            <div style={{fontSize:11,fontWeight:700,color:T.sub}}>{label}</div>
+            <div style={{fontSize:10,color:T.muted}}>Meta: {meta||0}</div>
           </div>
         ))}
       </div>
