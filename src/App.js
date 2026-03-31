@@ -170,6 +170,7 @@ function Dashboard({user,profiles,onNav}){
   const[calls,setCalls]=useState([]);const[clients,setClients]=useState([]);
   const[followups,setFollowups]=useState([]);const[goals,setGoals]=useState([]);const[loading,setLoading]=useState(true);
   const[volFilter,setVolFilter]=useState("week");const[goalFilter,setGoalFilter]=useState("day");
+  const[dashMonth,setDashMonth]=useState(new Date().toISOString().slice(0,7));
   const[campaigns,setDashCampaigns]=useState([]);
   useEffect(()=>{
     async function load(){
@@ -185,7 +186,8 @@ function Dashboard({user,profiles,onNav}){
     load();
   },[]);
   if(loading)return<Spinner/>;
-  const myCalls=user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls;
+  const allCalls=user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls;
+  const myCalls=allCalls.filter(c=>c.date?.startsWith(dashMonth));
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
   const myFU=user.role==="vendedor"?followups.filter(f=>f.user_id===user.id):followups;
   const pendFU=myFU.filter(f=>f.status==="Pendente"&&f.date<=today());
@@ -203,7 +205,7 @@ function Dashboard({user,profiles,onNav}){
     volData=Array.from({length:dim},(_,i)=>{const k=`${now.toISOString().slice(0,7)}-${String(i+1).padStart(2,"0")}`;return{name:String(i+1),Ligações:myCalls.filter(c=>c.date===k).length};});
   }
   const originsData=allOrigins.map(o=>({name:o,value:myCalls.filter(c=>clients.find(cl=>cl.id===c.client_id)?.origin===o).length})).filter(d=>d.value>0);
-  const period=now.toISOString().slice(0,7);
+  const period=dashMonth;
   const sellers=profiles.filter(p=>p.role==="vendedor");
   const[ws,we]=weekRange();
   // Para vendedor: mostra só as metas dele. Para admin/gestor: soma a equipe toda
@@ -227,9 +229,12 @@ function Dashboard({user,profiles,onNav}){
         <StatCard label="Follow-ups Pendentes" value={pendFU.length} color={pendFU.length>0?T.yellow:T.green} icon="⏰"/>
         <StatCard label="Clientes Acionados" value={acionados} color={T.accent} icon="👥"/>
       </div>
-      <div style={{marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <div style={{fontSize:13,fontWeight:700,color:T.sub}}>🎯 Meta de Equipe</div>
-        <div style={{display:"flex",gap:6}}>{FB.map(([k,v])=><Btn key={k} size="sm" variant={goalFilter===k?"primary":"ghost"} onClick={()=>setGoalFilter(k)}>{v}</Btn>)}</div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"6px 12px",fontSize:12,fontFamily:"inherit"}} value={dashMonth} onChange={e=>setDashMonth(e.target.value)}/>
+          {FB.map(([k,v])=><Btn key={k} size="sm" variant={goalFilter===k?"primary":"ghost"} onClick={()=>setGoalFilter(k)}>{v}</Btn>)}
+        </div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:16,marginBottom:28}}>
         {[
@@ -786,6 +791,17 @@ function Goals({user,profiles}){
     if(error)return alert("Erro ao salvar campanha. Execute o SQL da tabela campaigns.");
     setCampModal(false);setCampForm({name:"",day:0,week:0,month:0});await load();
   }
+  async function deleteCampaign(id){
+    if(!confirm("Excluir esta campanha?"))return;
+    await supabase.from("campaigns").delete().eq("id",id);
+    await load();
+  }
+  async function deleteGoal(){
+    if(!current)return;
+    if(!confirm("Excluir a meta de "+targetProfile?.name+" para "+periodLabel+"?"))return;
+    await supabase.from("goals").delete().eq("id",current.id);
+    await load();
+  }
   const[yr,mo]=period.split("-");
   const MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
   const periodLabel=`${MN[parseInt(mo)-1]} de ${yr}`;
@@ -809,6 +825,7 @@ function Goals({user,profiles}){
           </div>
           <div style={{display:"flex",gap:8}}>
             {user.role==="admin"&&<Btn onClick={()=>setCampModal(true)} variant="ghost">+ Campanha</Btn>}
+            {user.role==="admin"&&current&&<Btn variant="danger" size="sm" onClick={deleteGoal}>🗑 Meta</Btn>}
             {user.role==="admin"&&<Btn onClick={()=>{
             if(current){
               const f={...current};
@@ -844,10 +861,15 @@ function Goals({user,profiles}){
           {user.role==="admin"&&<Btn size="lg" onClick={()=>setEditGoal(true)}>+ Adicionar Meta</Btn>}
         </Card>}
       {campaigns.length>0&&<div style={{display:"flex",gap:16,flexWrap:"wrap",marginTop:8}}>
-        {campaigns.map(camp=><GoalCategoryCard key={camp.id} categoryLabel="🏷 Campanha" categoryTitle={camp.name} color={T.accent}
-          todayReal={todayCalls} todayMeta={camp.day}
-          weekReal={weekCalls} weekMeta={camp.week}
-          monthReal={myCalls.length} monthMeta={camp.month}/>)}
+        {campaigns.map(camp=>(
+          <div key={camp.id} style={{position:"relative",flex:1,minWidth:260}}>
+            {user.role==="admin"&&<button onClick={()=>deleteCampaign(camp.id)} style={{position:"absolute",top:10,right:10,zIndex:10,background:T.red+"22",border:`1px solid ${T.red}40`,color:T.red,borderRadius:6,padding:"3px 8px",fontSize:11,cursor:"pointer",fontWeight:700}}>🗑 Excluir</button>}
+            <GoalCategoryCard categoryLabel="🏷 Campanha" categoryTitle={camp.name} color={T.accent}
+              todayReal={todayCalls} todayMeta={camp.day}
+              weekReal={weekCalls} weekMeta={camp.week}
+              monthReal={myCalls.length} monthMeta={camp.month}/>
+          </div>
+        ))}
       </div>}
       <Modal open={editGoal} title="Configurar Metas" onClose={()=>setEditGoal(false)} width={600}>
         <div style={{color:T.muted,fontSize:12,marginBottom:12}}>Vendedor: <strong style={{color:T.text}}>{targetProfile?.name}</strong> · <strong style={{color:T.text}}>{periodLabel}</strong></div>
@@ -941,6 +963,8 @@ function EditableList({title,table,color,icon}){
 function Settings({user,profiles,loadProfiles}){
   const[tab,setTab]=useState("users");const[modal,setModal]=useState(false);
   const[form,setForm]=useState({name:"",email:"",password:"",role:"vendedor"});
+  const[resetModal,setResetModal]=useState(false);
+  const[resetConfirm,setResetConfirm]=useState("");
   if(user.role!=="admin")return<Card style={{textAlign:"center",padding:48,color:T.muted}}>Acesso restrito a administradores.</Card>;
   async function createUser(){
     if(!form.name||!form.email||!form.password)return alert("Preencha todos os campos.");
@@ -948,10 +972,26 @@ function Settings({user,profiles,loadProfiles}){
     if(error)return alert("Erro: "+error.message);
     alert("Usuário criado!");setModal(false);await loadProfiles();
   }
+  async function resetSystem(){
+    if(resetConfirm!=="RESETAR")return alert("Digite RESETAR para confirmar.");
+    if(!confirm("ATENÇÃO: Esta ação apagará TODOS os dados do sistema (clientes, ligações, metas, etc). Deseja continuar?"))return;
+    await Promise.all([
+      supabase.from("calls").delete().neq("id","00000000-0000-0000-0000-000000000000"),
+      supabase.from("whatsapp_logs").delete().neq("id","00000000-0000-0000-0000-000000000000"),
+      supabase.from("followups").delete().neq("id","00000000-0000-0000-0000-000000000000"),
+      supabase.from("meetings").delete().neq("id","00000000-0000-0000-0000-000000000000"),
+      supabase.from("goals").delete().neq("id","00000000-0000-0000-0000-000000000000"),
+      supabase.from("campaigns").delete().neq("id","00000000-0000-0000-0000-000000000000"),
+      supabase.from("clients").delete().neq("id","00000000-0000-0000-0000-000000000000"),
+    ]);
+    alert("Sistema resetado com sucesso!");
+    setResetModal(false);setResetConfirm("");
+    window.location.reload();
+  }
   return(
     <div>
-      <div style={{display:"flex",gap:8,marginBottom:24}}>
-        {[["users","👤 Usuários"],["segments","🗂 Segmentos"],["origins","🌐 Origens"]].map(([k,v])=><Btn key={k} variant={tab===k?"primary":"ghost"} onClick={()=>setTab(k)}>{v}</Btn>)}
+      <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
+        {[["users","👤 Usuários"],["segments","🗂 Segmentos"],["origins","🌐 Origens"],["danger","⚠️ Sistema"]].map(([k,v])=><Btn key={k} variant={tab===k?"primary":"ghost"} onClick={()=>setTab(k)}>{v}</Btn>)}
       </div>
       {tab==="users"&&<>
         <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}><Btn size="sm" onClick={()=>{setForm({name:"",email:"",password:"",role:"vendedor"});setModal(true);}}>+ Novo Usuário</Btn></div>
@@ -968,6 +1008,27 @@ function Settings({user,profiles,loadProfiles}){
       </>}
       {tab==="segments"&&<EditableList title="Segmentos" table="segments" color={T.accent} icon="🗂"/>}
       {tab==="origins"&&<EditableList title="Origens de Leads" table="origins" color={T.purple} icon="🌐"/>}
+      {tab==="danger"&&<Card style={{border:`1px solid ${T.red}40`}}>
+        <div style={{fontSize:15,fontWeight:700,color:T.red,marginBottom:8}}>⚠️ Zona de Perigo</div>
+        <div style={{color:T.sub,fontSize:13,marginBottom:20}}>Estas ações são irreversíveis. Use com extremo cuidado.</div>
+        <div style={{background:T.surface,borderRadius:10,padding:20,border:`1px solid ${T.border}`,marginBottom:16}}>
+          <div style={{fontWeight:700,color:T.text,marginBottom:6}}>🗑 Resetar todo o sistema</div>
+          <div style={{color:T.muted,fontSize:12,marginBottom:14}}>Apaga todos os clientes, ligações, WhatsApp, follow-ups, reuniões, metas e campanhas. Os usuários não são apagados.</div>
+          <Btn variant="danger" onClick={()=>setResetModal(true)}>Resetar Sistema</Btn>
+        </div>
+      </Card>}
+      <Modal open={resetModal} title="⚠️ Resetar Sistema" onClose={()=>{setResetModal(false);setResetConfirm("");}}>
+        <div style={{background:T.red+"15",border:`1px solid ${T.red}40`,borderRadius:10,padding:16,marginBottom:20}}>
+          <div style={{color:T.red,fontWeight:700,fontSize:14,marginBottom:6}}>⚠️ ATENÇÃO — Esta ação é irreversível!</div>
+          <div style={{color:T.sub,fontSize:12}}>Todos os dados serão apagados permanentemente: clientes, ligações, WhatsApp, follow-ups, reuniões, metas e campanhas.</div>
+        </div>
+        <div style={{color:T.sub,fontSize:13,marginBottom:8}}>Para confirmar, digite <strong style={{color:T.red}}>RESETAR</strong> no campo abaixo:</div>
+        <input style={{background:T.surface,border:`1px solid ${T.red}60`,borderRadius:8,color:T.text,padding:"10px 14px",fontSize:14,width:"100%",fontFamily:"inherit",outline:"none",marginBottom:20,boxSizing:"border-box"}} placeholder="Digite RESETAR" value={resetConfirm} onChange={e=>setResetConfirm(e.target.value)}/>
+        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <Btn variant="ghost" onClick={()=>{setResetModal(false);setResetConfirm("");}}>Cancelar</Btn>
+          <Btn variant="danger" onClick={resetSystem} disabled={resetConfirm!=="RESETAR"}>Confirmar Reset</Btn>
+        </div>
+      </Modal>
       <Modal open={modal} title="Criar Novo Usuário" onClose={()=>setModal(false)}>
         <Input label="Nome completo" value={form.name} onChange={v=>setForm(f=>({...f,name:v}))} required/>
         <Input label="E-mail" value={form.email} onChange={v=>setForm(f=>({...f,email:v}))} type="email" required/>
