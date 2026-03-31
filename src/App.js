@@ -211,9 +211,9 @@ function Dashboard({user,profiles,onNav}){
     ? goals.filter(g=>g.user_id===user.id&&g.period===period)
     : sellers.map(s=>goals.find(g=>g.user_id===s.id&&g.period===period)).filter(Boolean);
   const totalMeta={
-    general:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.daily:goalFilter==="week"?g.weekly:g.monthly),0),
     prosp:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.prosp_day:goalFilter==="week"?g.prosp_week:g.prosp_month),0),
     base:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.base_day:goalFilter==="week"?g.base_week:g.base_month),0),
+    get general(){ return this.prosp + this.base; }
   };
   const filterCalls=goalFilter==="day"?myCalls.filter(c=>c.date===today()):goalFilter==="week"?myCalls.filter(c=>c.date>=ws&&c.date<=we):myCalls;
   const realGeneral=filterCalls.length,realProsp=Math.round(realGeneral*.4),realBase=Math.round(realGeneral*.6);
@@ -236,12 +236,19 @@ function Dashboard({user,profiles,onNav}){
           {label:"Total Ligações",real:realGeneral,meta:totalMeta.general,color:T.purple},
           {label:"Base de Clientes",real:realBase,meta:totalMeta.base,color:T.green},
           {label:"Prospecção",real:realProsp,meta:totalMeta.prosp,color:T.orange},
-          ...campaigns.map(camp=>({label:camp.name,real:realGeneral,meta:goalFilter==="day"?camp.day:goalFilter==="week"?camp.week:camp.month,color:T.accent}))
-        ].map(({label,real,meta,color})=>(
-          <Card key={label} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
-            <div style={{fontSize:12,fontWeight:700,color:T.sub}}>{label}</div>
-            {!meta?<div style={{fontSize:11,color:T.muted,textAlign:"center",padding:16}}>Meta não definida</div>
-            :<><DonutRing real={real} meta={meta} color={color} size={110}/><div style={{fontSize:11,color:T.muted}}>Meta: {meta}</div></>}
+          ...campaigns.map(camp=>({
+            label:camp.name,
+            real:realGeneral,
+            meta:goalFilter==="day"?camp.day:goalFilter==="week"?camp.week:camp.month,
+            color:T.accent,
+            isCamp:true
+          }))
+        ].map(({label,real,meta,color,isCamp})=>(
+          <Card key={label} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12,border:isCamp?`1px solid ${T.accent}40`:`1px solid ${T.border}`}}>
+            <div style={{fontSize:12,fontWeight:700,color:isCamp?T.accent:T.sub}}>{isCamp?"🏷 "+label:label}</div>
+            {!meta
+              ?<div style={{fontSize:11,color:T.muted,textAlign:"center",padding:16}}>Meta não definida</div>
+              :<><DonutRing real={real} meta={meta} color={color} size={110}/><div style={{fontSize:11,color:T.muted}}>Meta: {meta}</div></>}
           </Card>
         ))}
       </div>
@@ -743,7 +750,7 @@ function Goals({user,profiles}){
   const sellers=profiles.filter(p=>p.role==="vendedor");
   const targetUser=user.role==="vendedor"?user.id:(selectedUser||sellers[0]?.id);
   const targetProfile=profiles.find(p=>p.id===targetUser);
-  const emptyForm={daily:0,weekly:0,monthly:0,prosp_day:3,prosp_week:15,prosp_month:60,base_day:5,base_week:25,base_month:100};
+  const emptyForm={daily:8,weekly:40,monthly:160,prosp_day:3,prosp_week:15,prosp_month:60,base_day:5,base_week:25,base_month:100};
   const[form,setForm]=useState(emptyForm);
   const load=useCallback(async()=>{
     const[g,c,camp]=await Promise.all([
@@ -802,23 +809,46 @@ function Goals({user,profiles}){
           </div>
           <div style={{display:"flex",gap:8}}>
             {user.role==="admin"&&<Btn onClick={()=>setCampModal(true)} variant="ghost">+ Campanha</Btn>}
-            {user.role==="admin"&&<Btn onClick={()=>{setForm(current?{daily:current.daily,weekly:current.weekly,monthly:current.monthly,prosp_day:current.prosp_day,prosp_week:current.prosp_week,prosp_month:current.prosp_month,base_day:current.base_day,base_week:current.base_week,base_month:current.base_month}:emptyForm);setEditGoal(true);}}>+ {current?"Editar Meta":"Adicionar Meta"}</Btn>}
+            {user.role==="admin"&&<Btn onClick={()=>{
+            if(current){
+              const f={...current};
+              f.daily=f.prosp_day+f.base_day;
+              f.weekly=f.prosp_week+f.base_week;
+              f.monthly=f.prosp_month+f.base_month;
+              setForm(f);
+            } else {
+              setForm(emptyForm);
+            }
+            setEditGoal(true);}}>+ {current?"Editar Meta":"Adicionar Meta"}</Btn>}
           </div>
         </div>
       </Card>}
-      {current?<div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
-        <GoalCategoryCard categoryLabel="Campanha / Geral" categoryTitle="Total de Ligações" color={T.purple} todayReal={todayCalls} todayMeta={current.daily} weekReal={weekCalls} weekMeta={current.weekly} monthReal={myCalls.length} monthMeta={current.monthly}/>
-        <GoalCategoryCard categoryLabel="Prospecção" categoryTitle="Prospecção" color={T.orange} todayReal={Math.round(todayCalls*.4)} todayMeta={current.prosp_day} weekReal={Math.round(weekCalls*.4)} weekMeta={current.prosp_week} monthReal={Math.round(myCalls.length*.4)} monthMeta={current.prosp_month}/>
-        <GoalCategoryCard categoryLabel="Base de Clientes" categoryTitle="Base de Clientes" color={T.green} todayReal={Math.round(todayCalls*.6)} todayMeta={current.base_day} weekReal={Math.round(weekCalls*.6)} weekMeta={current.base_week} monthReal={Math.round(myCalls.length*.6)} monthMeta={current.base_month}/>
-        {campaigns.map(camp=><GoalCategoryCard key={camp.id} categoryLabel="Campanha" categoryTitle={camp.name} color={T.accent}
+      {current
+        ?<div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:campaigns.length>0?20:0}}>
+          <GoalCategoryCard categoryLabel="Campanha / Geral" categoryTitle="Total de Ligações" color={T.purple}
+            todayReal={todayCalls} todayMeta={current.prosp_day+current.base_day}
+            weekReal={weekCalls} weekMeta={current.prosp_week+current.base_week}
+            monthReal={myCalls.length} monthMeta={current.prosp_month+current.base_month}/>
+          <GoalCategoryCard categoryLabel="Prospecção" categoryTitle="Prospecção" color={T.orange}
+            todayReal={Math.round(todayCalls*.4)} todayMeta={current.prosp_day}
+            weekReal={Math.round(weekCalls*.4)} weekMeta={current.prosp_week}
+            monthReal={Math.round(myCalls.length*.4)} monthMeta={current.prosp_month}/>
+          <GoalCategoryCard categoryLabel="Base de Clientes" categoryTitle="Base de Clientes" color={T.green}
+            todayReal={Math.round(todayCalls*.6)} todayMeta={current.base_day}
+            weekReal={Math.round(weekCalls*.6)} weekMeta={current.base_week}
+            monthReal={Math.round(myCalls.length*.6)} monthMeta={current.base_month}/>
+        </div>
+        :<Card style={{textAlign:"center",padding:40,marginBottom:20}}>
+          <div style={{fontSize:44,marginBottom:14}}>🎯</div>
+          <div style={{color:T.sub,fontSize:15,marginBottom:20}}>Nenhuma meta para <strong>{periodLabel}</strong>.</div>
+          {user.role==="admin"&&<Btn size="lg" onClick={()=>setEditGoal(true)}>+ Adicionar Meta</Btn>}
+        </Card>}
+      {campaigns.length>0&&<div style={{display:"flex",gap:16,flexWrap:"wrap",marginTop:8}}>
+        {campaigns.map(camp=><GoalCategoryCard key={camp.id} categoryLabel="🏷 Campanha" categoryTitle={camp.name} color={T.accent}
           todayReal={todayCalls} todayMeta={camp.day}
           weekReal={weekCalls} weekMeta={camp.week}
           monthReal={myCalls.length} monthMeta={camp.month}/>)}
-      </div>:<Card style={{textAlign:"center",padding:56}}>
-        <div style={{fontSize:44,marginBottom:14}}>🎯</div>
-        <div style={{color:T.sub,fontSize:15,marginBottom:20}}>Nenhuma meta para <strong>{periodLabel}</strong>.</div>
-        {user.role==="admin"&&<Btn size="lg" onClick={()=>setEditGoal(true)}>+ Adicionar Meta</Btn>}
-      </Card>}
+      </div>}
       <Modal open={editGoal} title="Configurar Metas" onClose={()=>setEditGoal(false)} width={600}>
         <div style={{color:T.muted,fontSize:12,marginBottom:12}}>Vendedor: <strong style={{color:T.text}}>{targetProfile?.name}</strong> · <strong style={{color:T.text}}>{periodLabel}</strong></div>
         <div style={{background:T.surface,borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:T.sub}}>💡 A <strong style={{color:T.text}}>Meta Geral</strong> é calculada automaticamente (Prospecção + Base)</div>
