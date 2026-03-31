@@ -6,7 +6,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 //  ⚙️  CONFIGURAÇÃO SUPABASE
 // ============================================================
 const SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY;
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── THEME ───────────────────────────────────────────────────
@@ -29,7 +29,7 @@ function ListsProvider({ children }){
     setOrigins((o.data||[]).map(x=>x.name));
   },[]);
   useEffect(()=>{reload();},[reload]);
-  return React.createElement(ListsContext.Provider,{value:{segments,origins,reload}},children);
+  return <ListsContext.Provider value={{segments,origins,reload}}>{children}</ListsContext.Provider>;
 }
 function getSegments(){return["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"];}
 function getOrigins(){return["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro"];}
@@ -61,7 +61,7 @@ function Input({label,value,onChange,type="text",options,style,required,placehol
       {label&&<div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>{label}{required&&<span style={{color:T.red}}> *</span>}</div>}
       {options?<select style={s} value={value} onChange={e=>onChange(e.target.value)}><option value="">Selecione...</option>{options.map(o=><option key={o} value={o}>{o}</option>)}</select>
       :<input style={s} type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} min={min} max={max}/>}
-    </div></ListsProvider>
+    </div>
   );
 }
 function Modal({open,title,onClose,children,width=520}){
@@ -170,10 +170,17 @@ function Dashboard({user,profiles,onNav}){
   const[calls,setCalls]=useState([]);const[clients,setClients]=useState([]);
   const[followups,setFollowups]=useState([]);const[goals,setGoals]=useState([]);const[loading,setLoading]=useState(true);
   const[volFilter,setVolFilter]=useState("week");const[goalFilter,setGoalFilter]=useState("day");
+  const[campaigns,setDashCampaigns]=useState([]);
   useEffect(()=>{
     async function load(){
-      const[c,cl,f,g]=await Promise.all([supabase.from("calls").select("*"),supabase.from("clients").select("*"),supabase.from("followups").select("*"),supabase.from("goals").select("*")]);
-      setCalls(c.data||[]);setClients(cl.data||[]);setFollowups(f.data||[]);setGoals(g.data||[]);setLoading(false);
+      const[c,cl,f,g,camp]=await Promise.all([
+        supabase.from("calls").select("*"),
+        supabase.from("clients").select("*"),
+        supabase.from("followups").select("*"),
+        supabase.from("goals").select("*"),
+        supabase.from("campaigns").select("*")
+      ]);
+      setCalls(c.data||[]);setClients(cl.data||[]);setFollowups(f.data||[]);setGoals(g.data||[]);setDashCampaigns(camp.data||[]);setLoading(false);
     }
     load();
   },[]);
@@ -198,14 +205,17 @@ function Dashboard({user,profiles,onNav}){
   const originsData=allOrigins.map(o=>({name:o,value:myCalls.filter(c=>clients.find(cl=>cl.id===c.client_id)?.origin===o).length})).filter(d=>d.value>0);
   const period=now.toISOString().slice(0,7);
   const sellers=profiles.filter(p=>p.role==="vendedor");
-  const teamGoals=sellers.map(s=>goals.find(g=>g.user_id===s.id&&g.period===period)).filter(Boolean);
   const[ws,we]=weekRange();
-  const filterCalls=goalFilter==="day"?myCalls.filter(c=>c.date===today()):goalFilter==="week"?myCalls.filter(c=>c.date>=ws&&c.date<=we):myCalls;
+  // Para vendedor: mostra só as metas dele. Para admin/gestor: soma a equipe toda
+  const relevantGoals = user.role==="vendedor"
+    ? goals.filter(g=>g.user_id===user.id&&g.period===period)
+    : sellers.map(s=>goals.find(g=>g.user_id===s.id&&g.period===period)).filter(Boolean);
   const totalMeta={
-    general:teamGoals.reduce((a,g)=>a+(goalFilter==="day"?g.daily:goalFilter==="week"?g.weekly:g.monthly),0),
-    prosp:teamGoals.reduce((a,g)=>a+(goalFilter==="day"?g.prosp_day:goalFilter==="week"?g.prosp_week:g.prosp_month),0),
-    base:teamGoals.reduce((a,g)=>a+(goalFilter==="day"?g.base_day:goalFilter==="week"?g.base_week:g.base_month),0),
+    general:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.daily:goalFilter==="week"?g.weekly:g.monthly),0),
+    prosp:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.prosp_day:goalFilter==="week"?g.prosp_week:g.prosp_month),0),
+    base:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.base_day:goalFilter==="week"?g.base_week:g.base_month),0),
   };
+  const filterCalls=goalFilter==="day"?myCalls.filter(c=>c.date===today()):goalFilter==="week"?myCalls.filter(c=>c.date>=ws&&c.date<=we):myCalls;
   const realGeneral=filterCalls.length,realProsp=Math.round(realGeneral*.4),realBase=Math.round(realGeneral*.6);
   const FB=[["day","Dia"],["week","Semana"],["month","Mês"]];
   return(
@@ -221,12 +231,17 @@ function Dashboard({user,profiles,onNav}){
         <div style={{fontSize:13,fontWeight:700,color:T.sub}}>🎯 Meta de Equipe</div>
         <div style={{display:"flex",gap:6}}>{FB.map(([k,v])=><Btn key={k} size="sm" variant={goalFilter===k?"primary":"ghost"} onClick={()=>setGoalFilter(k)}>{v}</Btn>)}</div>
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:28}}>
-        {[{label:"Total Ligações",real:realGeneral,meta:totalMeta.general,color:T.purple},{label:"Base de Clientes",real:realBase,meta:totalMeta.base,color:T.green},{label:"Prospecção",real:realProsp,meta:totalMeta.prosp,color:T.orange},{label:"Campanha",real:0,meta:0,color:T.accent,empty:true}].map(({label,real,meta,color,empty})=>(
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:16,marginBottom:28}}>
+        {[
+          {label:"Total Ligações",real:realGeneral,meta:totalMeta.general,color:T.purple},
+          {label:"Base de Clientes",real:realBase,meta:totalMeta.base,color:T.green},
+          {label:"Prospecção",real:realProsp,meta:totalMeta.prosp,color:T.orange},
+          ...campaigns.map(camp=>({label:camp.name,real:realGeneral,meta:goalFilter==="day"?camp.day:goalFilter==="week"?camp.week:camp.month,color:T.accent}))
+        ].map(({label,real,meta,color})=>(
           <Card key={label} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:12}}>
             <div style={{fontSize:12,fontWeight:700,color:T.sub}}>{label}</div>
-            {empty?<div style={{fontSize:11,color:T.muted,textAlign:"center",padding:16}}>Cadastre uma campanha para ativar</div>
-            :<><DonutRing real={real} meta={meta||1} color={color} size={110}/><div style={{fontSize:11,color:T.muted}}>Meta: {meta}</div></>}
+            {!meta?<div style={{fontSize:11,color:T.muted,textAlign:"center",padding:16}}>Meta não definida</div>
+            :<><DonutRing real={real} meta={meta} color={color} size={110}/><div style={{fontSize:11,color:T.muted}}>Meta: {meta}</div></>}
           </Card>
         ))}
       </div>
@@ -723,7 +738,7 @@ function Goals({user,profiles}){
   const[goals,setGoals]=useState([]);const[calls,setCalls]=useState([]);const[loading,setLoading]=useState(true);
   const[period,setPeriod]=useState(new Date().toISOString().slice(0,7));
   const[selectedUser,setSelectedUser]=useState("");const[editGoal,setEditGoal]=useState(false);
-  const[campaigns,setCampaigns]=useState(()=>{try{const s=localStorage.getItem("krcf_campaigns");return s?JSON.parse(s):[];}catch{return[];}});
+  const[campaigns,setCampaigns]=useState([]);
   const[campModal,setCampModal]=useState(false);const[campForm,setCampForm]=useState({name:"",day:0,week:0,month:0});
   const sellers=profiles.filter(p=>p.role==="vendedor");
   const targetUser=user.role==="vendedor"?user.id:(selectedUser||sellers[0]?.id);
@@ -731,11 +746,14 @@ function Goals({user,profiles}){
   const emptyForm={daily:0,weekly:0,monthly:0,prosp_day:3,prosp_week:15,prosp_month:60,base_day:5,base_week:25,base_month:100};
   const[form,setForm]=useState(emptyForm);
   const load=useCallback(async()=>{
-    const[g,c]=await Promise.all([supabase.from("goals").select("*"),supabase.from("calls").select("date,user_id")]);
-    setGoals(g.data||[]);setCalls(c.data||[]);setLoading(false);
+    const[g,c,camp]=await Promise.all([
+      supabase.from("goals").select("*"),
+      supabase.from("calls").select("date,user_id"),
+      supabase.from("campaigns").select("*").order("created_at")
+    ]);
+    setGoals(g.data||[]);setCalls(c.data||[]);setCampaigns(camp.data||[]);setLoading(false);
   },[]);
   useEffect(()=>{load();},[load]);
-  useEffect(()=>{localStorage.setItem("krcf_campaigns",JSON.stringify(campaigns));},[campaigns]);
   const current=goals.find(g=>g.user_id===targetUser&&g.period===period);
   const todayCalls=calls.filter(c=>c.user_id===targetUser&&c.date===today()).length;
   const myCalls=calls.filter(c=>c.user_id===targetUser&&c.date?.startsWith(period));
@@ -755,7 +773,12 @@ function Goals({user,profiles}){
     else await supabase.from("goals").insert({...form,user_id:targetUser,period});
     await load();setEditGoal(false);
   }
-  function addCampaign(){if(!campForm.name)return alert("Informe o nome.");setCampaigns(cs=>[...cs,{...campForm,id:Date.now()}]);setCampModal(false);setCampForm({name:"",day:0,week:0,month:0});}
+  async function addCampaign(){
+    if(!campForm.name)return alert("Informe o nome.");
+    const{error}=await supabase.from("campaigns").insert({name:campForm.name,day:campForm.day,week:campForm.week,month:campForm.month});
+    if(error)return alert("Erro ao salvar campanha. Execute o SQL da tabela campaigns.");
+    setCampModal(false);setCampForm({name:"",day:0,week:0,month:0});await load();
+  }
   const[yr,mo]=period.split("-");
   const MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
   const periodLabel=`${MN[parseInt(mo)-1]} de ${yr}`;
@@ -787,7 +810,10 @@ function Goals({user,profiles}){
         <GoalCategoryCard categoryLabel="Campanha / Geral" categoryTitle="Total de Ligações" color={T.purple} todayReal={todayCalls} todayMeta={current.daily} weekReal={weekCalls} weekMeta={current.weekly} monthReal={myCalls.length} monthMeta={current.monthly}/>
         <GoalCategoryCard categoryLabel="Prospecção" categoryTitle="Prospecção" color={T.orange} todayReal={Math.round(todayCalls*.4)} todayMeta={current.prosp_day} weekReal={Math.round(weekCalls*.4)} weekMeta={current.prosp_week} monthReal={Math.round(myCalls.length*.4)} monthMeta={current.prosp_month}/>
         <GoalCategoryCard categoryLabel="Base de Clientes" categoryTitle="Base de Clientes" color={T.green} todayReal={Math.round(todayCalls*.6)} todayMeta={current.base_day} weekReal={Math.round(weekCalls*.6)} weekMeta={current.base_week} monthReal={Math.round(myCalls.length*.6)} monthMeta={current.base_month}/>
-        {campaigns.map(camp=><GoalCategoryCard key={camp.id} categoryLabel="Campanha" categoryTitle={camp.name} color={T.accent} todayReal={0} todayMeta={camp.day} weekReal={0} weekMeta={camp.week} monthReal={0} monthMeta={camp.month}/>)}
+        {campaigns.map(camp=><GoalCategoryCard key={camp.id} categoryLabel="Campanha" categoryTitle={camp.name} color={T.accent}
+          todayReal={todayCalls} todayMeta={camp.day}
+          weekReal={weekCalls} weekMeta={camp.week}
+          monthReal={myCalls.length} monthMeta={camp.month}/>)}
       </div>:<Card style={{textAlign:"center",padding:56}}>
         <div style={{fontSize:44,marginBottom:14}}>🎯</div>
         <div style={{color:T.sub,fontSize:15,marginBottom:20}}>Nenhuma meta para <strong>{periodLabel}</strong>.</div>
@@ -966,7 +992,8 @@ export default function App(){
   async function logout(){await supabase.auth.signOut();setAuthUser(null);}
   const preClient=quickTarget===page?quickClient:null;
   return(
-    <ListsProvider><div style={{minHeight:"100vh",background:T.bg,fontFamily:"'DM Sans','Inter',system-ui,sans-serif",color:T.text,display:"flex"}}>
+    <ListsProvider>
+    <div style={{minHeight:"100vh",background:T.bg,fontFamily:"'DM Sans','Inter',system-ui,sans-serif",color:T.text,display:"flex"}}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} *{box-sizing:border-box}`}</style>
       <div style={{width:220,background:T.surface,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh"}}>
         <div style={{padding:"22px 20px 16px",borderBottom:`1px solid ${T.border}`}}>
@@ -999,5 +1026,6 @@ export default function App(){
         {page==="settings"&&<Settings user={authUser} profiles={profiles} loadProfiles={loadProfiles}/>}
       </div>
     </div>
+    </ListsProvider>
   );
 }
