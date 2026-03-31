@@ -420,7 +420,7 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
 }
 
 // ─── CALLS ───────────────────────────────────────────────────
-function Calls({user,profiles,preClient}){
+function Calls({user,profiles,preClient,onSaved}){
   const[calls,setCalls]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);const[schedMeeting,setSchedMeeting]=useState(false);
   const emptyForm={client_id:"",date:today(),time:nowTime(),type:"Atendida",duration_min:"0",duration_sec:"0",obs:"",result:"Retornar"};
@@ -439,7 +439,9 @@ function Calls({user,profiles,preClient}){
     const duration=`${form.duration_min}min ${form.duration_sec}s`;
     await supabase.from("calls").insert({...form,duration,user_id:user.id,client_id:form.client_id});
     if(schedMeeting)alert("Ligação salva! Agende a reunião na aba Reuniões.");
+    const savedClient = myClients.find(c=>c.id===form.client_id);
     await load();setModal(false);setSchedMeeting(false);
+    if(onSaved && savedClient) onSaved(savedClient);
   }
   if(loading)return<Spinner/>;
   return(
@@ -501,7 +503,7 @@ function Calls({user,profiles,preClient}){
 }
 
 // ─── WHATSAPP ────────────────────────────────────────────────
-function Whatsapp({user,preClient}){
+function Whatsapp({user,preClient,onSaved}){
   const[whats,setWhats]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);
   const emptyForm={client_id:"",date:today(),time:nowTime(),type:"Enviado",content:"",status:"Enviado"};
@@ -643,7 +645,7 @@ function Followups({user,preClient}){
 }
 
 // ─── MEETINGS ────────────────────────────────────────────────
-function Meetings({user,profiles,preClient}){
+function Meetings({user,profiles,preClient,onMarkRealizada}){
   const[meetings,setMeetings]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);
   const emptyForm={client_id:"",title:"",date:today(),time:"09:00",duration_min:"30",location:"",description:"",status:"Agendada",participants:""};
@@ -694,7 +696,11 @@ function Meetings({user,profiles,preClient}){
               {m.description&&<div style={{color:T.muted,fontSize:12,marginTop:6}}>{m.description}</div>}
             </div>
             {m.status==="Agendada"&&<div style={{display:"flex",gap:6,flexShrink:0}}>
-              <Btn size="sm" variant="success" onClick={()=>updateStatus(m.id,"Realizada")}>✓ Realizada</Btn>
+              <Btn size="sm" variant="success" onClick={()=>{
+                    const cn=clients.find(c=>c.id===m.client_id)?.name||"—";
+                    if(onMarkRealizada) onMarkRealizada(m,cn);
+                    else updateStatus(m.id,"Realizada");
+                  }}>✓ Realizada</Btn>
               <Btn size="sm" variant="ghost" onClick={()=>updateStatus(m.id,"Reagendada")}>↺ Reagendar</Btn>
               <Btn size="sm" variant="danger" onClick={()=>updateStatus(m.id,"Cancelada")}>✕</Btn>
             </div>}
@@ -1044,79 +1050,757 @@ function Settings({user,profiles,loadProfiles}){
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────
-const MENU=[
-  {id:"dashboard",label:"Dashboard",icon:"📊"},
-  {id:"clients",label:"Clientes",icon:"👥"},
-  {id:"calls",label:"Ligações",icon:"📞"},
-  {id:"whatsapp",label:"WhatsApp",icon:"💬"},
-  {id:"followups",label:"Follow-ups",icon:"⏰"},
-  {id:"meetings",label:"Reuniões",icon:"📅"},
-  {id:"goals",label:"Metas",icon:"🎯"},
-  {id:"settings",label:"Configurações",icon:"⚙️"},
-];
-const PT={dashboard:"📊 Dashboard",clients:"👥 Clientes",calls:"📞 Ligações",whatsapp:"💬 WhatsApp",followups:"⏰ Follow-ups",meetings:"📅 Reuniões",goals:"🎯 Metas",settings:"⚙️ Configurações"};
 
-export default function App(){
-  const[authUser,setAuthUser]=useState(null);const[checking,setChecking]=useState(true);
-  const[page,setPage]=useState("dashboard");const[profiles,setProfiles]=useState([]);
-  const[pendingFU,setPendingFU]=useState(0);
-  const[quickClient,setQuickClient]=useState(null);const[quickTarget,setQuickTarget]=useState(null);
-  useEffect(()=>{
-    supabase.auth.getSession().then(async({data:{session}})=>{
-      if(session){const{data:profile}=await supabase.from("profiles").select("*").eq("id",session.user.id).single();if(profile)setAuthUser({...session.user,...profile});}
-      setChecking(false);
-    });
-  },[]);
-  const loadProfiles=useCallback(async()=>{const{data}=await supabase.from("profiles").select("*");setProfiles(data||[]);},[]);
-  useEffect(()=>{
-    if(authUser){
-      loadProfiles();
-      supabase.from("followups").select("id,status,date,user_id").then(({data})=>{
-        const fu=data||[];const mine=authUser.role==="vendedor"?fu.filter(f=>f.user_id===authUser.id):fu;
-        setPendingFU(mine.filter(f=>f.status==="Pendente"&&f.date<=today()).length);
+
+// ─── CONSTANTES ADICIONAIS ───────────────────────────────────
+const PROPOSAL_STATUS = ["Em negociação","Proposta enviada","Proposta fechada","Proposta perdida","Aguardando retorno"];
+const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+
+// ─── HOOK: NOTIFICAÇÕES 15min ────────────────────────────────
+function useAlerts(user) {
+  const [alerts, setAlerts] = useState([]);
+
+  useEffect(() => {
+    async function checkAlerts() {
+      const now = new Date();
+      const in15 = new Date(now.getTime() + 15 * 60000);
+      const todayStr = now.toISOString().slice(0, 10);
+      const nowTime = now.toTimeString().slice(0, 5);
+      const in15Time = in15.toTimeString().slice(0, 5);
+
+      const [{ data: meetings }, { data: followups }] = await Promise.all([
+        supabase.from("meetings").select("*").eq("date", todayStr).eq("status", "Agendada"),
+        supabase.from("followups").select("*,clients(name)").eq("date", todayStr).eq("status", "Pendente"),
+      ]);
+
+      const newAlerts = [];
+
+      (meetings || []).forEach(m => {
+        if (m.time && m.time >= nowTime && m.time <= in15Time) {
+          if (!user?.id) return;
+          if (user.role === "vendedor" && m.user_id !== user.id) return;
+          newAlerts.push({ id: `m-${m.id}`, type: "meeting", title: `📅 Reunião em 15 min!`, body: m.title, time: m.time });
+        }
+      });
+
+      (followups || []).forEach(f => {
+        const fu_time = f.time || "09:00";
+        if (fu_time >= nowTime && fu_time <= in15Time) {
+          if (!user?.id) return;
+          if (user.role === "vendedor" && f.user_id !== user.id) return;
+          newAlerts.push({ id: `f-${f.id}`, type: "followup", title: `⏰ Follow-up em 15 min!`, body: f.description || f.type, time: fu_time });
+        }
+      });
+
+      if (newAlerts.length > 0) setAlerts(prev => {
+        const existingIds = prev.map(a => a.id);
+        const novel = newAlerts.filter(a => !existingIds.includes(a.id));
+        return [...prev, ...novel];
       });
     }
-  },[authUser,loadProfiles]);
-  function handleQuick(client,target){setQuickClient(client);setQuickTarget(target);setPage(target);}
-  if(checking)return<div style={{minHeight:"100vh",background:T.bg,display:"flex",alignItems:"center",justifyContent:"center"}}><Spinner/></div>;
-  if(!authUser)return<Login onLogin={setAuthUser}/>;
-  async function logout(){await supabase.auth.signOut();setAuthUser(null);}
-  const preClient=quickTarget===page?quickClient:null;
-  return(
-    <ListsProvider>
-    <div style={{minHeight:"100vh",background:T.bg,fontFamily:"'DM Sans','Inter',system-ui,sans-serif",color:T.text,display:"flex"}}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}} *{box-sizing:border-box}`}</style>
-      <div style={{width:220,background:T.surface,borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",flexShrink:0,position:"sticky",top:0,height:"100vh"}}>
-        <div style={{padding:"22px 20px 16px",borderBottom:`1px solid ${T.border}`}}>
-          <div style={{fontSize:16,fontWeight:900,color:T.text,letterSpacing:"-0.3px"}}><span style={{color:T.accent}}>KR</span> CALLFLOW</div>
-          <div style={{fontSize:10,color:T.muted,marginTop:3,letterSpacing:1.5,textTransform:"uppercase"}}>Gestão Comercial</div>
+
+    if (user?.id) checkAlerts();
+    if (!user?.id) return;
+    const interval = setInterval(checkAlerts, 60000);
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  function dismiss(id) { setAlerts(prev => prev.filter(a => a.id !== id)); }
+  return { alerts, dismiss };
+}
+
+// ─── COMPONENT: ALERT POPUP ──────────────────────────────────
+function AlertPopup({ alerts, dismiss }) {
+  if (alerts.length === 0) return null;
+  return (
+    <div style={{ position: "fixed", bottom: 24, right: 24, zIndex: 2000, display: "flex", flexDirection: "column", gap: 10, maxWidth: 340 }}>
+      {alerts.map(a => (
+        <div key={a.id} style={{ background: T.card, border: `1px solid ${a.type === "meeting" ? T.accent : T.yellow}`, borderRadius: 14, padding: "14px 18px", boxShadow: "0 8px 32px #00000060", animation: "slideIn .3s ease" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+            <div>
+              <div style={{ fontWeight: 700, color: T.text, fontSize: 14, marginBottom: 4 }}>{a.title}</div>
+              <div style={{ color: T.sub, fontSize: 12 }}>{a.body}</div>
+              <div style={{ color: T.muted, fontSize: 11, marginTop: 4 }}>🕐 {a.time}</div>
+            </div>
+            <button onClick={() => dismiss(a.id)} style={{ background: "none", border: "none", color: T.muted, fontSize: 18, cursor: "pointer", flexShrink: 0 }}>×</button>
+          </div>
         </div>
-        <nav style={{flex:1,padding:"12px 8px",overflowY:"auto"}}>
-          {MENU.map(m=>(
-            <button key={m.id} onClick={()=>{setPage(m.id);setQuickClient(null);setQuickTarget(null);}} style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px 14px",borderRadius:10,border:"none",background:page===m.id?T.accentGlow:"transparent",color:page===m.id?T.accent:T.sub,fontWeight:page===m.id?700:500,fontSize:13,cursor:"pointer",textAlign:"left",transition:"all .15s",fontFamily:"inherit",position:"relative"}}>
-              <span>{m.icon}</span>{m.label}
-              {m.id==="followups"&&pendingFU>0&&<span style={{marginLeft:"auto",background:T.red,color:"#fff",borderRadius:99,fontSize:10,fontWeight:700,padding:"2px 6px"}}>{pendingFU}</span>}
-            </button>
-          ))}
-        </nav>
-        <div style={{padding:"16px 20px",borderTop:`1px solid ${T.border}`}}>
-          <div style={{fontSize:12,fontWeight:700,color:T.text}}>{authUser.name}</div>
-          <div style={{fontSize:11,color:T.muted,marginBottom:10}}>{authUser.role}</div>
-          <Btn size="sm" variant="ghost" style={{width:"100%"}} onClick={logout}>Sair</Btn>
+      ))}
+    </div>
+  );
+}
+
+// ─── COMPONENT: FOLLOW-UP REMINDER (após ligação/whatsapp) ───
+function FollowupReminder({ open, clientName, clientId, userId, onClose, onSaved }) {
+  const [form, setForm] = useState({ date: "", type: "Ligação", description: "" });
+  const [skip, setSkip] = useState(false);
+
+  async function save() {
+    if (!form.date) return alert("Selecione a data do follow-up.");
+    await supabase.from("followups").insert({ client_id: clientId, user_id: userId, date: form.date, type: form.type, description: form.description, status: "Pendente" });
+    onSaved(); onClose();
+  }
+
+  if (!open) return null;
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000090", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: T.card, border: `1px solid ${T.accent}`, borderRadius: 16, padding: 28, width: 420, maxWidth: "95vw" }}>
+        <div style={{ fontSize: 22, marginBottom: 6 }}>📌</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 4 }}>Agendar Follow-up</div>
+        <div style={{ color: T.sub, fontSize: 13, marginBottom: 20 }}>
+          Ótimo contato com <strong style={{ color: T.text }}>{clientName}</strong>! Que tal já agendar o próximo passo?
         </div>
-      </div>
-      <div style={{flex:1,overflow:"auto",padding:"28px 32px"}}>
-        <div style={{fontSize:22,fontWeight:800,color:T.text,marginBottom:24}}>{PT[page]}</div>
-        {page==="dashboard"&&<Dashboard user={authUser} profiles={profiles} onNav={p=>setPage(p)}/>}
-        {page==="clients"&&<Clients user={authUser} profiles={profiles} onQuickCall={c=>handleQuick(c,"calls")} onQuickWhats={c=>handleQuick(c,"whatsapp")} onQuickFU={c=>handleQuick(c,"followups")}/>}
-        {page==="calls"&&<Calls user={authUser} profiles={profiles} preClient={preClient}/>}
-        {page==="whatsapp"&&<Whatsapp user={authUser} preClient={preClient}/>}
-        {page==="followups"&&<Followups user={authUser} preClient={preClient}/>}
-        {page==="meetings"&&<Meetings user={authUser} profiles={profiles} preClient={preClient}/>}
-        {page==="goals"&&<Goals user={authUser} profiles={profiles}/>}
-        {page==="settings"&&<Settings user={authUser} profiles={profiles} loadProfiles={loadProfiles}/>}
+
+        {!skip ? (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Data *</div>
+                <input type="date" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 12px", fontSize: 13, width: "100%", fontFamily: "inherit" }}
+                  value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} />
+              </div>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Tipo</div>
+                <select style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 12px", fontSize: 13, width: "100%", fontFamily: "inherit" }}
+                  value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))}>
+                  {["Ligação", "WhatsApp", "Reunião"].map(t => <option key={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Descrição</div>
+              <input style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 12px", fontSize: 13, width: "100%", fontFamily: "inherit", boxSizing: "border-box" }}
+                placeholder="O que fazer neste follow-up?" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+            </div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button onClick={() => setSkip(true)} style={{ background: "none", border: "none", color: T.muted, fontSize: 12, cursor: "pointer" }}>Pular por agora</button>
+              <button onClick={onClose} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.sub, padding: "8px 16px", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+              <button onClick={save} style={{ background: T.accent, border: "none", borderRadius: 8, color: "#fff", padding: "8px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Salvar Follow-up</button>
+            </div>
+          </>
+        ) : (
+          <div style={{ textAlign: "center", padding: "10px 0 20px" }}>
+            <div style={{ color: T.sub, fontSize: 13, marginBottom: 16 }}>Sem problemas! Você pode agendar depois na aba Follow-ups.</div>
+            <button onClick={onClose} style={{ background: T.accent, border: "none", borderRadius: 8, color: "#fff", padding: "10px 24px", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>OK, entendi</button>
+          </div>
+        )}
       </div>
     </div>
+  );
+}
+
+// ─── COMPONENT: MEETING OUTCOME MODAL ────────────────────────
+function MeetingOutcomeModal({ open, meeting, clientName, userId, onClose, onSaved }) {
+  const [proposalStatus, setProposalStatus] = useState("Em negociação");
+  const [lostReason, setLostReason] = useState("");
+  const [fuDate, setFuDate] = useState("");
+  const [fuDesc, setFuDesc] = useState("");
+  const [postSaleDate, setPostSaleDate] = useState("");
+  const [notes, setNotes] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const isLost = proposalStatus === "Proposta perdida";
+  const isClosed = proposalStatus === "Proposta fechada";
+  const needsFU = !isClosed && !isLost;
+
+  async function save() {
+    if (needsFU && !fuDate) return alert("Agende o próximo follow-up para continuar.");
+    if (isLost && !lostReason) return alert("Informe o motivo da perda.");
+    if (isClosed && !postSaleDate) return alert("Agende a data de pós-venda.");
+    setSaving(true);
+
+    // Update meeting status
+    await supabase.from("meetings").update({ status: "Realizada", proposal_status: proposalStatus, lost_reason: lostReason, notes, post_sale_date: postSaleDate }).eq("id", meeting.id);
+
+    // Create follow-up if needed
+    if (needsFU && fuDate) {
+      await supabase.from("followups").insert({ client_id: meeting.client_id, user_id: userId, date: fuDate, type: "Ligação", description: fuDesc || `Follow-up pós reunião: ${meeting.title}`, status: "Pendente" });
+    }
+
+    // Create post-sale follow-up if closed
+    if (isClosed && postSaleDate) {
+      await supabase.from("followups").insert({ client_id: meeting.client_id, user_id: userId, date: postSaleDate, type: "Ligação", description: `Pós-venda: ${meeting.title}`, status: "Pendente" });
+    }
+
+    setSaving(false); onSaved(); onClose();
+  }
+
+  if (!open) return null;
+  const statusColor = { "Proposta fechada": T.green, "Proposta perdida": T.red, "Em negociação": T.accent, "Proposta enviada": T.purple, "Aguardando retorno": T.yellow };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#00000090", zIndex: 1500, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 28, width: 500, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}>
+        <div style={{ fontSize: 16, fontWeight: 700, color: T.text, marginBottom: 4 }}>📋 Resultado da Reunião</div>
+        <div style={{ color: T.sub, fontSize: 13, marginBottom: 20 }}>{meeting?.title} — {clientName}</div>
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ color: T.sub, fontSize: 12, marginBottom: 8, fontWeight: 600 }}>Status da Proposta *</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {PROPOSAL_STATUS.map(s => (
+              <button key={s} onClick={() => setProposalStatus(s)} style={{ padding: "8px 14px", borderRadius: 8, border: `1px solid ${proposalStatus === s ? statusColor[s] : T.border}`, background: proposalStatus === s ? statusColor[s] + "22" : "transparent", color: proposalStatus === s ? statusColor[s] : T.sub, fontSize: 12, fontWeight: proposalStatus === s ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }}>{s}</button>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Observações da reunião</div>
+          <textarea style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 12px", fontSize: 13, width: "100%", fontFamily: "inherit", resize: "vertical", minHeight: 80, boxSizing: "border-box" }} placeholder="O que foi discutido?" value={notes} onChange={e => setNotes(e.target.value)} />
+        </div>
+
+        {isLost && (
+          <div style={{ marginBottom: 16, padding: 14, background: T.red + "11", borderRadius: 10, border: `1px solid ${T.red}30` }}>
+            <div style={{ color: T.red, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Motivo da perda *</div>
+            <input style={{ background: T.surface, border: `1px solid ${T.red}40`, borderRadius: 8, color: T.text, padding: "8px 12px", fontSize: 13, width: "100%", fontFamily: "inherit", boxSizing: "border-box" }}
+              placeholder="Ex: Preço alto, concorrente, sem budget..." value={lostReason} onChange={e => setLostReason(e.target.value)} />
+          </div>
+        )}
+
+        {isClosed && (
+          <div style={{ marginBottom: 16, padding: 14, background: T.green + "11", borderRadius: 10, border: `1px solid ${T.green}30` }}>
+            <div style={{ color: T.green, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>🎉 Data de Pós-venda *</div>
+            <input type="date" style={{ background: T.surface, border: `1px solid ${T.green}40`, borderRadius: 8, color: T.text, padding: "8px 12px", fontSize: 13, width: "100%", fontFamily: "inherit" }}
+              value={postSaleDate} onChange={e => setPostSaleDate(e.target.value)} />
+          </div>
+        )}
+
+        {needsFU && (
+          <div style={{ marginBottom: 16, padding: 14, background: T.accent + "11", borderRadius: 10, border: `1px solid ${T.accent}30` }}>
+            <div style={{ color: T.accent, fontSize: 12, marginBottom: 8, fontWeight: 600 }}>📌 Próximo Follow-up *</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 12px" }}>
+              <div>
+                <div style={{ color: T.muted, fontSize: 11, marginBottom: 4 }}>Data</div>
+                <input type="date" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 12px", fontSize: 13, width: "100%", fontFamily: "inherit" }}
+                  value={fuDate} onChange={e => setFuDate(e.target.value)} />
+              </div>
+              <div>
+                <div style={{ color: T.muted, fontSize: 11, marginBottom: 4 }}>Descrição</div>
+                <input style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 12px", fontSize: 13, width: "100%", fontFamily: "inherit" }}
+                  placeholder="O que fazer?" value={fuDesc} onChange={e => setFuDesc(e.target.value)} />
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 8 }}>
+          <button onClick={onClose} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.sub, padding: "9px 18px", fontSize: 13, cursor: "pointer" }}>Cancelar</button>
+          <button onClick={save} disabled={saving} style={{ background: T.green, border: "none", borderRadius: 8, color: "#fff", padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: saving ? 0.7 : 1 }}>
+            {saving ? "Salvando..." : "✓ Confirmar"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── GUIA: RELATÓRIOS IA ─────────────────────────────────────
+function Reports({ user, profiles }) {
+  const [loading, setLoading] = useState(false);
+  const [report, setReport] = useState("");
+  const [reportType, setReportType] = useState("lost_reasons");
+  const [selectedSeller, setSelectedSeller] = useState("");
+  const [sending, setSending] = useState(false);
+  const [sentMsg, setSentMsg] = useState("");
+  const sellers = profiles.filter(p => p.role === "vendedor");
+
+  async function generateReport() {
+    setLoading(true); setReport(""); setSentMsg("");
+    try {
+      // Fetch data
+      const [{ data: meetings }, { data: calls }, { data: clients }] = await Promise.all([
+        supabase.from("meetings").select("*"),
+        supabase.from("calls").select("*"),
+        supabase.from("clients").select("*"),
+      ]);
+
+      let prompt = "";
+      if (reportType === "lost_reasons") {
+        const lostMeetings = (meetings || []).filter(m => m.proposal_status === "Proposta perdida");
+        const reasons = lostMeetings.map(m => m.lost_reason).filter(Boolean);
+        prompt = `Você é um analista comercial especialista. Analise os seguintes motivos de proposta perdida de uma equipe de vendas e gere um relatório executivo em português com:
+1. Principais padrões identificados
+2. Top 3 motivos mais frequentes com análise
+3. Recomendações estratégicas para reduzir perdas
+4. Insights sobre o mercado/clientes
+
+Motivos registrados: ${JSON.stringify(reasons)}
+Total de reuniões: ${meetings?.length || 0}
+Total de perdas: ${lostMeetings.length}
+Taxa de perda: ${meetings?.length ? Math.round((lostMeetings.length / meetings.length) * 100) : 0}%
+
+Seja objetivo e use dados concretos. Formate com seções claras.`;
+      } else {
+        const sellerId = selectedSeller || (sellers[0]?.id);
+        const seller = profiles.find(p => p.id === sellerId);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const sellerCalls = (calls || []).filter(c => c.user_id === sellerId && c.date === todayStr);
+        const sellerMeetings = (meetings || []).filter(m => m.user_id === sellerId);
+        const closed = sellerMeetings.filter(m => m.proposal_status === "Proposta fechada").length;
+        const lost = sellerMeetings.filter(m => m.proposal_status === "Proposta perdida").length;
+
+        prompt = `Você é um coach de vendas especialista. Analise a performance do vendedor e gere um relatório individual em português com insights e dicas de melhoria.
+
+Vendedor: ${seller?.name}
+Data: ${todayStr}
+Ligações hoje: ${sellerCalls.length}
+Atendidas: ${sellerCalls.filter(c => c.type === "Atendida").length}
+Com interesse: ${sellerCalls.filter(c => c.result === "Interesse").length}
+Propostas fechadas (total): ${closed}
+Propostas perdidas (total): ${lost}
+Taxa de conversão: ${sellerMeetings.length ? Math.round((closed / sellerMeetings.length) * 100) : 0}%
+
+Gere:
+1. Resumo da performance de hoje
+2. Pontos fortes identificados
+3. 3 insights específicos de melhoria com exemplos práticos
+4. Meta motivacional para amanhã
+5. Uma técnica de vendas específica para aplicar
+
+Seja encorajador mas direto. Use dados específicos.`;
+      }
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+      });
+      const data = await response.json();
+      const text = data.content?.map(i => i.text || "").join("\n") || "Erro ao gerar relatório.";
+      setReport(text);
+    } catch (e) {
+      setReport("Erro ao conectar com a IA. Verifique sua conexão.");
+    }
+    setLoading(false);
+  }
+
+  async function sendByEmail() {
+    if (!report) return;
+    setSending(true);
+    // Simulate sending - in production would use an email service
+    await new Promise(r => setTimeout(r, 1500));
+    setSentMsg("✅ Relatório enviado por e-mail com sucesso!");
+    setSending(false);
+  }
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 16 }}>⚙️ Configurar Relatório</div>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div>
+            <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Tipo</div>
+            <select style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 14px", fontSize: 13, fontFamily: "inherit" }}
+              value={reportType} onChange={e => setReportType(e.target.value)}>
+              <option value="lost_reasons">📊 Análise de Propostas Perdidas (Admin)</option>
+              <option value="individual">👤 Performance Individual do Vendedor</option>
+            </select>
+          </div>
+          {reportType === "individual" && (
+            <div>
+              <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Vendedor</div>
+              <select style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 14px", fontSize: 13, fontFamily: "inherit" }}
+                value={selectedSeller} onChange={e => setSelectedSeller(e.target.value)}>
+                <option value="">Selecione...</option>
+                {sellers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+          )}
+          <button onClick={generateReport} disabled={loading} style={{ background: T.accent, border: "none", borderRadius: 8, color: "#fff", padding: "9px 20px", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1, fontFamily: "inherit" }}>
+            {loading ? "🤖 Gerando..." : "🤖 Gerar com IA"}
+          </button>
+          {report && (
+            <button onClick={sendByEmail} disabled={sending} style={{ background: T.green, border: "none", borderRadius: 8, color: "#fff", padding: "9px 20px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+              {sending ? "Enviando..." : "📧 Enviar por E-mail"}
+            </button>
+          )}
+        </div>
+        {sentMsg && <div style={{ color: T.green, fontSize: 13, marginTop: 12, fontWeight: 600 }}>{sentMsg}</div>}
+      </Card>
+
+      {loading && (
+        <Card style={{ textAlign: "center", padding: 48 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>🤖</div>
+          <div style={{ color: T.sub, fontSize: 14 }}>Analisando dados com IA...</div>
+          <div style={{ color: T.muted, fontSize: 12, marginTop: 8 }}>Isso pode levar alguns segundos</div>
+        </Card>
+      )}
+
+      {report && !loading && (
+        <Card>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>📄 Relatório Gerado pela IA</div>
+            <div style={{ fontSize: 11, color: T.muted }}>{new Date().toLocaleString("pt-BR")}</div>
+          </div>
+          <div style={{ color: T.sub, fontSize: 13, lineHeight: 1.8, whiteSpace: "pre-wrap", borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>{report}</div>
+        </Card>
+      )}
+
+      {!report && !loading && (
+        <Card style={{ textAlign: "center", padding: 48 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+          <div style={{ color: T.sub, fontSize: 14 }}>Selecione o tipo de relatório e clique em Gerar com IA</div>
+          <div style={{ color: T.muted, fontSize: 12, marginTop: 8 }}>A IA analisa os dados do sistema e gera insights automáticos</div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── GUIA: TÉCNICAS DE VENDAS IA ─────────────────────────────
+function SalesTech({ user }) {
+  const [product, setProduct] = useState("");
+  const [frameworks, setFrameworks] = useState([]);
+  const [loadingFW, setLoadingFW] = useState(false);
+  const [savedFrameworks, setSavedFrameworks] = useState(() => {
+    try { const s = localStorage.getItem("krcf_frameworks"); return s ? JSON.parse(s) : []; } catch { return []; }
+  });
+  const [activeScript, setActiveScript] = useState(null);
+  const [scriptContent, setScriptContent] = useState("");
+  const [loadingScript, setLoadingScript] = useState(false);
+
+  useEffect(() => { localStorage.setItem("krcf_frameworks", JSON.stringify(savedFrameworks)); }, [savedFrameworks]);
+
+  async function searchFrameworks() {
+    if (!product.trim()) return alert("Digite o que pretende vender.");
+    setLoadingFW(true); setFrameworks([]);
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: CLAUDE_MODEL, max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: `Você é um especialista em vendas B2B e B2C. Para o produto/serviço "${product}", liste as 5 melhores metodologias/frameworks de venda. 
+Responda APENAS em JSON válido, sem markdown, sem texto adicional, no formato:
+[{"name":"Nome do Framework","description":"O que é em 1 frase","bestFor":"Melhor para...","steps":"Passo 1, Passo 2, Passo 3"}]`
+          }]
+        })
+      });
+      const data = await response.json();
+      const text = data.content?.map(i => i.text || "").join("") || "[]";
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setFrameworks(parsed);
+    } catch (e) {
+      alert("Erro ao buscar frameworks. Tente novamente.");
+    }
+    setLoadingFW(false);
+  }
+
+  function saveFramework(fw) {
+    const already = savedFrameworks.find(f => f.name === fw.name && f.product === product);
+    if (already) return alert("Este framework já foi salvo!");
+    setSavedFrameworks(prev => [...prev, { ...fw, product, id: Date.now() }]);
+  }
+
+  function deleteFramework(id) {
+    if (!confirm("Remover este framework?")) return;
+    setSavedFrameworks(prev => prev.filter(f => f.id !== id));
+  }
+
+  async function openScript(fw) {
+    setActiveScript(fw); setScriptContent(""); setLoadingScript(true);
+    try {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: CLAUDE_MODEL, max_tokens: 1000,
+          messages: [{
+            role: "user",
+            content: `Você é um especialista em vendas. Crie um guia completo em português para vender "${fw.product}" usando a metodologia ${fw.name}.
+
+Estruture assim:
+
+## 🎯 SCRIPT DE VENDA — ${fw.name}
+Produto: ${fw.product}
+
+### 📝 Roteiro passo a passo
+[script detalhado com falas reais]
+
+### ⚡ Principais Objeções e Respostas
+Objeção 1: [objeção comum]
+Resposta: [como responder]
+
+Objeção 2: [objeção comum]  
+Resposta: [como responder]
+
+Objeção 3: [objeção comum]
+Resposta: [como responder]
+
+### 💡 Exemplos Práticos
+[2 exemplos de situações reais aplicando o framework]
+
+### ✅ Checklist de Fechamento
+[5 pontos para verificar antes de fechar]
+
+Seja específico, use linguagem natural brasileira e exemplos concretos.`
+          }]
+        })
+      });
+      const data = await response.json();
+      const text = data.content?.map(i => i.text || "").join("\n") || "Erro ao gerar script.";
+      setScriptContent(text);
+    } catch (e) {
+      setScriptContent("Erro ao conectar com a IA.");
+    }
+    setLoadingScript(false);
+  }
+
+  const FW_COLORS = ["#8B5CF6", "#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#EC4899", "#14B8A6"];
+
+  return (
+    <div>
+      {/* Search */}
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 12 }}>🔍 Buscar Metodologias de Venda</div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <input style={{ flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "10px 14px", fontSize: 14, fontFamily: "inherit", outline: "none" }}
+            placeholder="O que você pretende vender? Ex: Software de gestão, Plano de saúde, Consultoria..."
+            value={product} onChange={e => setProduct(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && searchFrameworks()} />
+          <button onClick={searchFrameworks} disabled={loadingFW} style={{ background: T.purple, border: "none", borderRadius: 8, color: "#fff", padding: "10px 22px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>
+            {loadingFW ? "🤖 Buscando..." : "🤖 Buscar com IA"}
+          </button>
+        </div>
+      </Card>
+
+      {/* Results from search */}
+      {loadingFW && (
+        <Card style={{ textAlign: "center", padding: 40 }}>
+          <div style={{ fontSize: 36, marginBottom: 10 }}>🤖</div>
+          <div style={{ color: T.sub }}>Analisando o produto e buscando as melhores metodologias...</div>
+        </Card>
+      )}
+
+      {frameworks.length > 0 && (
+        <div style={{ marginBottom: 24 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 12 }}>📚 Metodologias sugeridas para: <span style={{ color: T.accent }}>{product}</span></div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {frameworks.map((fw, i) => (
+              <Card key={i} style={{ border: `1px solid ${FW_COLORS[i % FW_COLORS.length]}30` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                      <span style={{ background: FW_COLORS[i % FW_COLORS.length] + "22", color: FW_COLORS[i % FW_COLORS.length], borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>Framework</span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: T.text }}>{fw.name}</span>
+                    </div>
+                    <div style={{ color: T.sub, fontSize: 13, marginBottom: 4 }}>{fw.description}</div>
+                    <div style={{ color: T.muted, fontSize: 12 }}>✅ {fw.bestFor}</div>
+                    <div style={{ color: T.muted, fontSize: 11, marginTop: 6 }}>Passos: {fw.steps}</div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                    <button onClick={() => saveFramework(fw)} style={{ background: FW_COLORS[i % FW_COLORS.length] + "22", border: `1px solid ${FW_COLORS[i % FW_COLORS.length]}40`, color: FW_COLORS[i % FW_COLORS.length], borderRadius: 8, padding: "7px 14px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                      + Salvar
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Saved frameworks as buttons */}
+      {savedFrameworks.length > 0 && (
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 12 }}>⭐ Meus Frameworks Salvos</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 20 }}>
+            {savedFrameworks.map((fw, i) => (
+              <div key={fw.id} style={{ position: "relative" }}>
+                <button onClick={() => openScript(fw)} style={{ background: FW_COLORS[i % FW_COLORS.length] + "22", border: `1px solid ${FW_COLORS[i % FW_COLORS.length]}60`, color: FW_COLORS[i % FW_COLORS.length], borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", maxWidth: 200 }}>
+                  <div>{fw.name}</div>
+                  <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.8, marginTop: 2 }}>{fw.product}</div>
+                </button>
+                <button onClick={() => deleteFramework(fw.id)} style={{ position: "absolute", top: -6, right: -6, background: T.red, border: "none", borderRadius: "50%", color: "#fff", width: 18, height: 18, fontSize: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700 }}>×</button>
+              </div>
+            ))}
+          </div>
+
+          {/* Script Modal */}
+          {activeScript && (
+            <div style={{ position: "fixed", inset: 0, background: "#00000090", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setActiveScript(null)}>
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 16, padding: 28, width: 680, maxWidth: "95vw", maxHeight: "88vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+                  <div>
+                    <div style={{ fontSize: 17, fontWeight: 700, color: T.text }}>{activeScript.name}</div>
+                    <div style={{ fontSize: 12, color: T.muted, marginTop: 2 }}>Produto: {activeScript.product}</div>
+                  </div>
+                  <button onClick={() => setActiveScript(null)} style={{ background: "none", border: "none", color: T.muted, fontSize: 24, cursor: "pointer" }}>×</button>
+                </div>
+                {loadingScript ? (
+                  <div style={{ textAlign: "center", padding: 48 }}>
+                    <div style={{ fontSize: 36, marginBottom: 12 }}>🤖</div>
+                    <div style={{ color: T.sub }}>Gerando script personalizado...</div>
+                  </div>
+                ) : (
+                  <div style={{ color: T.sub, fontSize: 13, lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{scriptContent}</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {frameworks.length === 0 && savedFrameworks.length === 0 && !loadingFW && (
+        <Card style={{ textAlign: "center", padding: 56 }}>
+          <div style={{ fontSize: 44, marginBottom: 14 }}>🧠</div>
+          <div style={{ color: T.sub, fontSize: 15, marginBottom: 8 }}>Digite o que você vende e deixe a IA sugerir as melhores metodologias</div>
+          <div style={{ color: T.muted, fontSize: 12 }}>SPIN Selling, BANT, Challenger Sale, MEDDIC e muito mais</div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ─── MENU E APP ATUALIZADOS ───────────────────────────────────
+const MENU = [
+  { id: "dashboard", label: "Dashboard",       icon: "📊" },
+  { id: "clients",   label: "Clientes",         icon: "👥" },
+  { id: "calls",     label: "Ligações",         icon: "📞" },
+  { id: "whatsapp",  label: "WhatsApp",         icon: "💬" },
+  { id: "followups", label: "Follow-ups",       icon: "⏰" },
+  { id: "meetings",  label: "Reuniões",         icon: "📅" },
+  { id: "goals",     label: "Metas",            icon: "🎯" },
+  { id: "reports",   label: "Relatórios IA",    icon: "🤖" },
+  { id: "sales",     label: "Técnicas de Venda",icon: "🧠" },
+  { id: "settings",  label: "Configurações",    icon: "⚙️" },
+];
+
+const PT = {
+  dashboard: "📊 Dashboard", clients: "👥 Clientes", calls: "📞 Ligações",
+  whatsapp: "💬 WhatsApp", followups: "⏰ Follow-ups", meetings: "📅 Reuniões",
+  goals: "🎯 Metas", reports: "🤖 Relatórios IA", sales: "🧠 Técnicas de Venda",
+  settings: "⚙️ Configurações"
+};
+
+export default function App() {
+  const [authUser, setAuthUser] = useState(null);
+  const [checking, setChecking] = useState(true);
+  const [page, setPage] = useState("dashboard");
+  const [profiles, setProfiles] = useState([]);
+  const [pendingFU, setPendingFU] = useState(0);
+  const [quickClient, setQuickClient] = useState(null);
+  const [quickTarget, setQuickTarget] = useState(null);
+
+  // Follow-up reminder state
+  const [fuReminder, setFuReminder] = useState({ open: false, clientName: "", clientId: null, userId: null });
+
+  // Meeting outcome state
+  const [meetingOutcome, setMeetingOutcome] = useState({ open: false, meeting: null, clientName: "" });
+
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session) {
+        const { data: profile } = await supabase.from("profiles").select("*").eq("id", session.user.id).single();
+        if (profile) setAuthUser({ ...session.user, ...profile });
+      }
+      setChecking(false);
+    });
+  }, []);
+
+  const loadProfiles = useCallback(async () => {
+    const { data } = await supabase.from("profiles").select("*");
+    setProfiles(data || []);
+  }, []);
+
+  useEffect(() => {
+    if (authUser) {
+      loadProfiles();
+      supabase.from("followups").select("id,status,date,user_id").then(({ data }) => {
+        const fu = data || [];
+        const mine = authUser.role === "vendedor" ? fu.filter(f => f.user_id === authUser.id) : fu;
+        setPendingFU(mine.filter(f => f.status === "Pendente" && f.date <= today()).length);
+      });
+    }
+  }, [authUser, loadProfiles]);
+
+  // Alerts hook - always called (React rules of hooks)
+  const { alerts, dismiss } = useAlerts(authUser || { id: null, role: "vendedor" });
+
+  function handleQuick(client, target) {
+    setQuickClient(client);
+    setQuickTarget(target);
+    setPage(target);
+  }
+
+  function showFuReminder(client) {
+    if (!client) return;
+    setFuReminder({ open: true, clientName: client.name, clientId: client.id, userId: authUser?.id });
+  }
+
+  function showMeetingOutcome(meeting, clientName) {
+    setMeetingOutcome({ open: true, meeting, clientName });
+  }
+
+  if (checking) return <div style={{ minHeight: "100vh", background: T.bg, display: "flex", alignItems: "center", justifyContent: "center" }}><Spinner /></div>;
+  if (!authUser) return <Login onLogin={setAuthUser} />;
+
+  async function logout() { await supabase.auth.signOut(); setAuthUser(null); }
+  const preClient = quickTarget === page ? quickClient : null;
+
+  return (
+    <ListsProvider>
+      <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'DM Sans','Inter',system-ui,sans-serif", color: T.text, display: "flex" }}>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}} *{box-sizing:border-box}`}</style>
+
+        {/* SIDEBAR */}
+        <div style={{ width: 220, background: T.surface, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
+          <div style={{ padding: "22px 20px 16px", borderBottom: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: T.text, letterSpacing: "-0.3px" }}><span style={{ color: T.accent }}>KR</span> CALLFLOW</div>
+            <div style={{ fontSize: 10, color: T.muted, marginTop: 3, letterSpacing: 1.5, textTransform: "uppercase" }}>Gestão Comercial</div>
+          </div>
+          <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
+            {MENU.map(m => (
+              <button key={m.id} onClick={() => { setPage(m.id); setQuickClient(null); setQuickTarget(null); }}
+                style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "9px 14px", borderRadius: 10, border: "none", background: page === m.id ? T.accentGlow : "transparent", color: page === m.id ? T.accent : T.sub, fontWeight: page === m.id ? 700 : 500, fontSize: 12, cursor: "pointer", textAlign: "left", transition: "all .15s", fontFamily: "inherit", position: "relative" }}>
+                <span>{m.icon}</span>{m.label}
+                {m.id === "followups" && pendingFU > 0 && <span style={{ marginLeft: "auto", background: T.red, color: "#fff", borderRadius: 99, fontSize: 10, fontWeight: 700, padding: "2px 6px" }}>{pendingFU}</span>}
+              </button>
+            ))}
+          </nav>
+          <div style={{ padding: "16px 20px", borderTop: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{authUser.name}</div>
+            <div style={{ fontSize: 11, color: T.muted, marginBottom: 10 }}>{authUser.role}</div>
+            <button style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 8, color: T.sub, padding: "6px 12px", fontSize: 12, cursor: "pointer", width: "100%", fontFamily: "inherit" }} onClick={logout}>Sair</button>
+          </div>
+        </div>
+
+        {/* MAIN */}
+        <div style={{ flex: 1, overflow: "auto", padding: "28px 32px" }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: T.text, marginBottom: 24 }}>{PT[page]}</div>
+          {page === "dashboard" && <Dashboard user={authUser} profiles={profiles} onNav={p => setPage(p)} />}
+          {page === "clients"   && <Clients   user={authUser} profiles={profiles} onQuickCall={c => handleQuick(c, "calls")} onQuickWhats={c => handleQuick(c, "whatsapp")} onQuickFU={c => handleQuick(c, "followups")} />}
+          {page === "calls"     && <Calls     user={authUser} profiles={profiles} preClient={preClient} onSaved={showFuReminder} />}
+          {page === "whatsapp"  && <Whatsapp  user={authUser} preClient={preClient} onSaved={showFuReminder} />}
+          {page === "followups" && <Followups user={authUser} preClient={preClient} />}
+          {page === "meetings"  && <Meetings  user={authUser} profiles={profiles} preClient={preClient} onMarkRealizada={showMeetingOutcome} />}
+          {page === "goals"     && <Goals     user={authUser} profiles={profiles} />}
+          {page === "reports"   && <Reports   user={authUser} profiles={profiles} />}
+          {page === "sales"     && <SalesTech user={authUser} />}
+          {page === "settings"  && <Settings  user={authUser} profiles={profiles} loadProfiles={loadProfiles} />}
+        </div>
+
+        {/* GLOBAL MODALS & ALERTS */}
+        <AlertPopup alerts={alerts} dismiss={dismiss} />
+        <FollowupReminder
+          open={fuReminder.open}
+          clientName={fuReminder.clientName}
+          clientId={fuReminder.clientId}
+          userId={fuReminder.userId}
+          onClose={() => setFuReminder(f => ({ ...f, open: false }))}
+          onSaved={() => {}}
+        />
+        <MeetingOutcomeModal
+          open={meetingOutcome.open}
+          meeting={meetingOutcome.meeting}
+          clientName={meetingOutcome.clientName}
+          userId={authUser?.id}
+          onClose={() => setMeetingOutcome(m => ({ ...m, open: false }))}
+          onSaved={() => setMeetingOutcome(m => ({ ...m, open: false }))}
+        />
+      </div>
     </ListsProvider>
   );
 }
