@@ -193,6 +193,26 @@ function Dashboard({user,profiles,onNav}){
   const pendFU=myFU.filter(f=>f.status==="Pendente"&&f.date<=today());
   const effective=myCalls.filter(c=>c.type==="Atendida").length;
   const convRate=myCalls.length>0?Math.round((effective/myCalls.length)*100):0;
+  const [dashClients,setDashClients]=useState([]);
+  const [dashActs,setDashActs]=useState([]);
+  useEffect(()=>{
+    async function loadExtra(){
+      const[{data:cl},{data:ca},{data:wh},{data:fu},{data:mt}]=await Promise.all([
+        supabase.from("clients").select("id,responsible"),
+        supabase.from("calls").select("client_id"),
+        supabase.from("whatsapp_logs").select("client_id"),
+        supabase.from("followups").select("client_id"),
+        supabase.from("meetings").select("client_id"),
+      ]);
+      setDashClients(cl||[]);
+      const ids=new Set([...(ca||[]),...(wh||[]),...(fu||[]),...(mt||[])].map(a=>a.client_id));
+      setDashActs(ids);
+    }
+    loadExtra();
+  },[]);
+  const visibleClients=user.role==="vendedor"?dashClients.filter(c=>c.responsible===user.id):dashClients;
+  const acionadosCount=visibleClients.filter(c=>dashActs.has(c.id)).length;
+  const semAcionamento=visibleClients.length-acionadosCount;
   const acionados=myClients.filter(c=>c.status!=="Lead").length;
   const now=new Date();
   let volData=[];
@@ -228,6 +248,20 @@ function Dashboard({user,profiles,onNav}){
         <StatCard label="Taxa de Contatos Efetivos" value={`${convRate}%`} color={T.purple} icon="🎯"/>
         <StatCard label="Follow-ups Pendentes" value={pendFU.length} color={pendFU.length>0?T.yellow:T.green} icon="⏰"/>
         <StatCard label="Clientes Acionados" value={acionados} color={T.accent} icon="👥"/>
+      </div>
+      <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:20}}>
+        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
+          <div style={{fontSize:26,fontWeight:800,color:T.accent}}>{visibleClients.length}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Total de Clientes</div>
+        </Card>
+        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
+          <div style={{fontSize:26,fontWeight:800,color:T.green}}>{acionadosCount}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Clientes Acionados</div>
+        </Card>
+        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
+          <div style={{fontSize:26,fontWeight:800,color:semAcionamento>0?T.red:T.muted}}>{semAcionamento}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Sem Acionamento</div>
+        </Card>
       </div>
       <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <div style={{fontSize:13,fontWeight:700,color:T.sub}}>🎯 Meta de Equipe</div>
@@ -301,14 +335,107 @@ function Dashboard({user,profiles,onNav}){
 }
 
 // ─── CLIENTS ─────────────────────────────────────────────────
+function ClientHistory({client,profiles,onClose}){
+  const[calls,setCalls]=useState([]);const[whats,setWhats]=useState([]);const[fus,setFus]=useState([]);const[meetings,setMeetings]=useState([]);const[loading,setLoading]=useState(true);
+  useEffect(()=>{
+    async function load(){
+      const[c,w,f,m]=await Promise.all([
+        supabase.from("calls").select("*").eq("client_id",client.id).order("date",{ascending:false}),
+        supabase.from("whatsapp_logs").select("*").eq("client_id",client.id).order("date",{ascending:false}),
+        supabase.from("followups").select("*").eq("client_id",client.id).order("date",{ascending:false}),
+        supabase.from("meetings").select("*").eq("client_id",client.id).order("date",{ascending:false}),
+      ]);
+      setCalls(c.data||[]);setWhats(w.data||[]);setFus(f.data||[]);setMeetings(m.data||[]);setLoading(false);
+    }
+    load();
+  },[client.id]);
+  const resp=profiles.find(p=>p.id===client.responsible);
+  const daysSince=(dateStr)=>{if(!dateStr)return null;const d=new Date(dateStr);const now=new Date();return Math.floor((now-d)/(1000*60*60*24));};
+  const allActivities=[
+    ...(calls||[]).map(c=>({date:c.date,type:"Ligação",icon:"📞",desc:`${c.type} · ${c.result}`,color:T.accent})),
+    ...(whats||[]).map(w=>({date:w.date,type:"WhatsApp",icon:"💬",desc:`${w.type} · ${w.status}`,color:T.green})),
+    ...(fus||[]).map(f=>({date:f.date,type:"Follow-up",icon:"⏰",desc:`${f.type} · ${f.status}`,color:T.yellow})),
+    ...(meetings||[]).map(m=>({date:m.date,type:"Reunião",icon:"📅",desc:`${m.title} · ${m.status}`,color:T.purple})),
+  ].sort((a,b)=>new Date(b.date)-new Date(a.date));
+  const lastActivity=allActivities[0];
+  const daysNoContact=lastActivity?daysSince(lastActivity.date):daysSince(client.created_at);
+  return(
+    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
+      <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:28,width:680,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:800,color:T.text,marginBottom:4}}>{client.name}</div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              {client.phone&&<span style={{color:T.sub,fontSize:12}}>📞 {client.phone}</span>}
+              {client.email&&<span style={{color:T.sub,fontSize:12}}>✉️ {client.email}</span>}
+              {resp&&<span style={{color:T.sub,fontSize:12}}>👤 {resp.name}</span>}
+              <Badge color={STATUS_COLORS[client.status]||T.muted}>{client.status}</Badge>
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:T.muted,fontSize:24,cursor:"pointer"}}>×</button>
+        </div>
+        <div style={{display:"flex",gap:12,marginBottom:20}}>
+          <Card style={{flex:1,textAlign:"center",padding:12}}>
+            <div style={{fontSize:22,fontWeight:800,color:T.accent}}>{calls.length+whats.length+fus.length+meetings.length}</div>
+            <div style={{fontSize:11,color:T.muted}}>Total atividades</div>
+          </Card>
+          <Card style={{flex:1,textAlign:"center",padding:12}}>
+            <div style={{fontSize:22,fontWeight:800,color:daysNoContact>30?T.red:daysNoContact>7?T.yellow:T.green}}>{daysNoContact??0}d</div>
+            <div style={{fontSize:11,color:T.muted}}>Sem contato</div>
+          </Card>
+          <Card style={{flex:1,textAlign:"center",padding:12}}>
+            <div style={{fontSize:22,fontWeight:800,color:T.purple}}>{meetings.filter(m=>m.proposal_status==="Proposta fechada").length}</div>
+            <div style={{fontSize:11,color:T.muted}}>Propostas fechadas</div>
+          </Card>
+          <Card style={{flex:1,textAlign:"center",padding:12}}>
+            <div style={{fontSize:22,fontWeight:800,color:T.muted}}>{daysSince(client.created_at)}d</div>
+            <div style={{fontSize:11,color:T.muted}}>Dias cadastrado</div>
+          </Card>
+        </div>
+        {loading?<Spinner/>:(
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:T.sub,marginBottom:12}}>📋 Histórico Completo</div>
+            {allActivities.length===0?<div style={{color:T.muted,textAlign:"center",padding:32}}>Nenhuma atividade registrada.</div>
+            :<div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {allActivities.map((a,i)=>(
+                <div key={i} style={{display:"flex",gap:12,alignItems:"center",background:T.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${T.border}`}}>
+                  <span style={{fontSize:18}}>{a.icon}</span>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <Badge color={a.color}>{a.type}</Badge>
+                      <span style={{color:T.muted,fontSize:11}}>{a.date}</span>
+                    </div>
+                    <div style={{color:T.sub,fontSize:12,marginTop:2}}>{a.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
   const{segments,origins}=useLists();
   const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);const[edit,setEdit]=useState(null);
+  const[historyClient,setHistoryClient]=useState(null);
+  const[allCalls,setAllCalls]=useState([]);const[allWhats,setAllWhats]=useState([]);const[allFUs,setAllFUs]=useState([]);const[allMeetings,setAllMeetings]=useState([]);
   const[search,setSearch]=useState("");const[fStatus,setFStatus]=useState("");const[fSeg,setFSeg]=useState("");const[fOrigin,setFOrigin]=useState("");const[fResp,setFResp]=useState("");
   const emptyForm={name:"",cnpj:"",phone:"",whatsapp:"",email:"",city:"",state:"",segment:"",origin:"",responsible:user.role==="vendedor"?user.id:"",status:"Lead"};
   const[form,setForm]=useState(emptyForm);
-  const load=useCallback(async()=>{const{data}=await supabase.from("clients").select("*").order("created_at",{ascending:false});setClients(data||[]);setLoading(false);},[]);
+  const load=useCallback(async()=>{
+    const[{data:cl},{data:ca},{data:wh},{data:fu},{data:mt}]=await Promise.all([
+      supabase.from("clients").select("*").order("created_at",{ascending:false}),
+      supabase.from("calls").select("client_id,date").order("date",{ascending:false}),
+      supabase.from("whatsapp_logs").select("client_id,date").order("date",{ascending:false}),
+      supabase.from("followups").select("client_id,date").order("date",{ascending:false}),
+      supabase.from("meetings").select("client_id,date").order("date",{ascending:false}),
+    ]);
+    setClients(cl||[]);setAllCalls(ca||[]);setAllWhats(wh||[]);setAllFUs(fu||[]);setAllMeetings(mt||[]);setLoading(false);
+  },[]);
   useEffect(()=>{load();},[load]);
   const visible=clients.filter(c=>{
     const q=search.toLowerCase();
@@ -340,8 +467,37 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
   }
   if(loading)return<Spinner/>;
   const sellers=profiles.filter(p=>p.role==="vendedor");
+  const visibleAll = clients.filter(c=>user.role==="vendedor"?c.responsible===user.id:true);
+  const getLastActivity=(cid)=>{
+    const dates=[
+      ...(allCalls.filter(a=>a.client_id===cid).map(a=>a.date)),
+      ...(allWhats.filter(a=>a.client_id===cid).map(a=>a.date)),
+      ...(allFUs.filter(a=>a.client_id===cid).map(a=>a.date)),
+      ...(allMeetings.filter(a=>a.client_id===cid).map(a=>a.date)),
+    ].filter(Boolean).sort().reverse();
+    return dates[0]||null;
+  };
+  const getDaysSince=(dateStr)=>{if(!dateStr)return 999;const d=new Date(dateStr);const now=new Date();return Math.floor((now-d)/(1000*60*60*24));};
+  const acionadosCount=visibleAll.filter(c=>{
+    return allCalls.some(a=>a.client_id===c.id)||allWhats.some(a=>a.client_id===c.id)||allFUs.some(a=>a.client_id===c.id)||allMeetings.some(a=>a.client_id===c.id);
+  }).length;
+  const semAcionamento=visibleAll.length-acionadosCount;
   return(
     <div>
+      <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
+          <div style={{fontSize:28,fontWeight:800,color:T.accent}}>{visibleAll.length}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Total de Clientes</div>
+        </Card>
+        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
+          <div style={{fontSize:28,fontWeight:800,color:T.green}}>{acionadosCount}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Clientes Acionados</div>
+        </Card>
+        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
+          <div style={{fontSize:28,fontWeight:800,color:semAcionamento>0?T.red:T.muted}}>{semAcionamento}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Sem Acionamento</div>
+        </Card>
+      </div>
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
         <input style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,flex:1,minWidth:150,fontFamily:"inherit"}} placeholder="🔍 Buscar..." value={search} onChange={e=>setSearch(e.target.value)}/>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fStatus} onChange={e=>setFStatus(e.target.value)}>
@@ -363,16 +519,21 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
       <Card style={{padding:0,overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead><tr style={{background:T.surface}}>
-            {["Nome","Telefone","Segmento","Origem","Status","Acionamentos","Responsável",""].map(h=><th key={h} style={{padding:"10px 12px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:11,borderBottom:`1px solid ${T.border}`}}>{h}</th>)}
+            {["Nome","Telefone","Dias Cadastro","Último Contato","Segmento","Status","Acionamentos","Responsável",""].map(h=><th key={h} style={{padding:"10px 12px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:11,borderBottom:`1px solid ${T.border}`}}>{h}</th>)}
           </tr></thead>
           <tbody>
             {visible.length===0&&<tr><td colSpan={8} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhum cliente encontrado.</td></tr>}
             {visible.map(c=>(
               <tr key={c.id} style={{borderBottom:`1px solid ${T.border}15`}}>
-                <td style={{padding:"10px 12px",color:T.text,fontWeight:600}}>{c.name}</td>
+                <td style={{padding:"10px 12px"}}>
+                  <button onClick={()=>setHistoryClient(c)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:13,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit",textAlign:"left"}}>{c.name}</button>
+                </td>
                 <td style={{padding:"10px 12px",color:T.sub}}>{c.phone}</td>
+                <td style={{padding:"10px 12px",textAlign:"center"}}>
+                  <span style={{color:T.muted,fontSize:12}}>{getDaysSince(c.created_at)}d</span>
+                </td>
+                <td style={{padding:"10px 12px",textAlign:"center"}}>{(()=>{const last=getLastActivity(c.id);const days=getDaysSince(last);return<span style={{color:days>30?T.red:days>7?T.yellow:T.green,fontWeight:700,fontSize:12}}>{last?days+"d":"—"}</span>;})()}</td>
                 <td style={{padding:"10px 12px"}}><Badge color={T.accent}>{c.segment||"—"}</Badge></td>
-                <td style={{padding:"10px 12px"}}><Badge color={T.purple}>{c.origin||"—"}</Badge></td>
                 <td style={{padding:"10px 12px"}}><Badge color={STATUS_COLORS[c.status]||T.muted}>{c.status}</Badge></td>
                 <td style={{padding:"10px 12px"}}>
                   <div style={{display:"flex",gap:4}}>
@@ -415,6 +576,7 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+      {historyClient&&<ClientHistory client={historyClient} profiles={profiles} onClose={()=>setHistoryClient(null)}/>}
     </div>
   );
 }
@@ -755,6 +917,7 @@ function GoalCategoryCard({categoryLabel,categoryTitle,color,todayReal,todayMeta
 function Goals({user,profiles}){
   const[goals,setGoals]=useState([]);const[calls,setCalls]=useState([]);const[loading,setLoading]=useState(true);
   const[period,setPeriod]=useState(new Date().toISOString().slice(0,7));
+  const[timeFilter,setTimeFilter]=useState("month"); // day|week|month
   const[selectedUser,setSelectedUser]=useState("");const[editGoal,setEditGoal]=useState(false);
   const[campaigns,setCampaigns]=useState([]);
   const[campModal,setCampModal]=useState(false);const[campForm,setCampForm]=useState({name:"",day:0,week:0,month:0});
@@ -773,10 +936,12 @@ function Goals({user,profiles}){
   },[]);
   useEffect(()=>{load();},[load]);
   const current=goals.find(g=>g.user_id===targetUser&&g.period===period);
-  const todayCalls=calls.filter(c=>c.user_id===targetUser&&c.date===today()).length;
-  const myCalls=calls.filter(c=>c.user_id===targetUser&&c.date?.startsWith(period));
   const[ws,we]=weekRange();
+  const todayCalls=calls.filter(c=>c.user_id===targetUser&&c.date===today()).length;
   const weekCalls=calls.filter(c=>c.user_id===targetUser&&c.date>=ws&&c.date<=we).length;
+  const monthCalls=calls.filter(c=>c.user_id===targetUser&&c.date?.startsWith(period)).length;
+  const myCalls=calls.filter(c=>c.user_id===targetUser&&c.date?.startsWith(period));
+  const filteredReal=timeFilter==="day"?todayCalls:timeFilter==="week"?weekCalls:monthCalls;
   function handleFormChange(key,val){
     setForm(f=>{
       const next={...f,[key]:Number(val)};
@@ -816,11 +981,14 @@ function Goals({user,profiles}){
     <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:24,flexWrap:"wrap",gap:12}}>
         <div style={{fontSize:13,color:T.muted}}>Objetivo × Realizado — Dia · Semana · Mês</div>
-        <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}>
-          {user.role!=="vendedor"&&<select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 14px",fontSize:13,fontFamily:"inherit"}} value={targetUser} onChange={e=>setSelectedUser(e.target.value)}>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          {user.role!=="vendedor"&&<select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,fontFamily:"inherit"}} value={targetUser} onChange={e=>setSelectedUser(e.target.value)}>
             {sellers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
           </select>}
-          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 14px",fontSize:13,fontFamily:"inherit"}} value={period} onChange={e=>setPeriod(e.target.value)}/>
+          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={period} onChange={e=>setPeriod(e.target.value)}/>
+          {[["day","Dia"],["week","Semana"],["month","Mês"]].map(([k,v])=>(
+            <button key={k} onClick={()=>setTimeFilter(k)} style={{padding:"7px 14px",borderRadius:8,border:"none",background:timeFilter===k?T.accent:T.surface,color:timeFilter===k?"#fff":T.sub,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{v}</button>
+          ))}
         </div>
       </div>
       {targetProfile&&<Card style={{marginBottom:24}}>
@@ -849,17 +1017,17 @@ function Goals({user,profiles}){
       {current
         ?<div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:campaigns.length>0?20:0}}>
           <GoalCategoryCard categoryLabel="Campanha / Geral" categoryTitle="Total de Ligações" color={T.purple}
-            todayReal={todayCalls} todayMeta={current.prosp_day+current.base_day}
-            weekReal={weekCalls} weekMeta={current.prosp_week+current.base_week}
-            monthReal={myCalls.length} monthMeta={current.prosp_month+current.base_month}/>
+            todayReal={filteredReal} todayMeta={timeFilter==="day"?current.prosp_day+current.base_day:timeFilter==="week"?current.prosp_week+current.base_week:current.prosp_month+current.base_month}
+            weekReal={filteredReal} weekMeta={timeFilter==="day"?current.prosp_day+current.base_day:timeFilter==="week"?current.prosp_week+current.base_week:current.prosp_month+current.base_month}
+            monthReal={filteredReal} monthMeta={timeFilter==="day"?current.prosp_day+current.base_day:timeFilter==="week"?current.prosp_week+current.base_week:current.prosp_month+current.base_month}/>
           <GoalCategoryCard categoryLabel="Prospecção" categoryTitle="Prospecção" color={T.orange}
-            todayReal={Math.round(todayCalls*.4)} todayMeta={current.prosp_day}
-            weekReal={Math.round(weekCalls*.4)} weekMeta={current.prosp_week}
-            monthReal={Math.round(myCalls.length*.4)} monthMeta={current.prosp_month}/>
+            todayReal={Math.round(filteredReal*.4)} todayMeta={timeFilter==="day"?current.prosp_day:timeFilter==="week"?current.prosp_week:current.prosp_month}
+            weekReal={Math.round(filteredReal*.4)} weekMeta={timeFilter==="day"?current.prosp_day:timeFilter==="week"?current.prosp_week:current.prosp_month}
+            monthReal={Math.round(filteredReal*.4)} monthMeta={timeFilter==="day"?current.prosp_day:timeFilter==="week"?current.prosp_week:current.prosp_month}/>
           <GoalCategoryCard categoryLabel="Base de Clientes" categoryTitle="Base de Clientes" color={T.green}
-            todayReal={Math.round(todayCalls*.6)} todayMeta={current.base_day}
-            weekReal={Math.round(weekCalls*.6)} weekMeta={current.base_week}
-            monthReal={Math.round(myCalls.length*.6)} monthMeta={current.base_month}/>
+            todayReal={Math.round(filteredReal*.6)} todayMeta={timeFilter==="day"?current.base_day:timeFilter==="week"?current.base_week:current.base_month}
+            weekReal={Math.round(filteredReal*.6)} weekMeta={timeFilter==="day"?current.base_day:timeFilter==="week"?current.base_week:current.base_month}
+            monthReal={Math.round(filteredReal*.6)} monthMeta={timeFilter==="day"?current.base_day:timeFilter==="week"?current.base_week:current.base_month}/>
         </div>
         :<Card style={{textAlign:"center",padding:40,marginBottom:20}}>
           <div style={{fontSize:44,marginBottom:14}}>🎯</div>
@@ -1297,8 +1465,9 @@ function MeetingOutcomeModal({ open, meeting, clientName, userId, onClose, onSav
 function Reports({ user, profiles }) {
   const [loading, setLoading] = useState(false);
   const [report, setReport] = useState("");
-  const [reportType, setReportType] = useState("lost_reasons");
-  const [selectedSeller, setSelectedSeller] = useState("");
+  const isVendedor = user.role === "vendedor";
+  const [reportType, setReportType] = useState(isVendedor ? "individual" : "lost_reasons");
+  const [selectedSeller, setSelectedSeller] = useState(isVendedor ? user.id : "");
   const [sending, setSending] = useState(false);
   const [sentMsg, setSentMsg] = useState("");
   const sellers = profiles.filter(p => p.role === "vendedor");
@@ -1361,14 +1530,22 @@ Seja encorajador mas direto. Use dados específicos.`;
 
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
         body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
       });
+      if (!response.ok) {
+        const err = await response.json();
+        setReport("Erro da IA: " + (err.error?.message || response.status));
+        setLoading(false); return;
+      }
       const data = await response.json();
       const text = data.content?.map(i => i.text || "").join("\n") || "Erro ao gerar relatório.";
       setReport(text);
     } catch (e) {
-      setReport("Erro ao conectar com a IA. Verifique sua conexão.");
+      setReport("Erro: " + e.message);
     }
     setLoading(false);
   }
@@ -1376,9 +1553,16 @@ Seja encorajador mas direto. Use dados específicos.`;
   async function sendByEmail() {
     if (!report) return;
     setSending(true);
-    // Simulate sending - in production would use an email service
-    await new Promise(r => setTimeout(r, 1500));
-    setSentMsg("✅ Relatório enviado por e-mail com sucesso!");
+    const seller = profiles.find(p => p.id === selectedSeller);
+    const gestor = profiles.find(p => p.role === "gestor");
+    const toEmail = seller?.email || user.email;
+    const ccEmail = gestor?.email;
+    // Open email client with report
+    const subject = encodeURIComponent(`KR CALLFLOW - Relatório de Performance - ${seller?.name || user.name}`);
+    const body = encodeURIComponent(report);
+    const cc = ccEmail ? `&cc=${ccEmail}` : "";
+    window.open(`mailto:${toEmail}?subject=${subject}${cc}&body=${body}`);
+    setSentMsg(`✅ Abrindo cliente de e-mail para: ${toEmail}${ccEmail?" (CC: "+ccEmail+")":""}`);
     setSending(false);
   }
 
@@ -1387,15 +1571,17 @@ Seja encorajador mas direto. Use dados específicos.`;
       <Card style={{ marginBottom: 20 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 16 }}>⚙️ Configurar Relatório</div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div>
-            <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Tipo</div>
-            <select style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 14px", fontSize: 13, fontFamily: "inherit" }}
-              value={reportType} onChange={e => setReportType(e.target.value)}>
-              <option value="lost_reasons">📊 Análise de Propostas Perdidas (Admin)</option>
-              <option value="individual">👤 Performance Individual do Vendedor</option>
-            </select>
-          </div>
-          {reportType === "individual" && (
+          {!isVendedor && (
+            <div>
+              <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Tipo</div>
+              <select style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 14px", fontSize: 13, fontFamily: "inherit" }}
+                value={reportType} onChange={e => setReportType(e.target.value)}>
+                <option value="lost_reasons">📊 Análise de Propostas Perdidas</option>
+                <option value="individual">👤 Performance Individual do Vendedor</option>
+              </select>
+            </div>
+          )}
+          {(reportType === "individual" && !isVendedor) && (
             <div>
               <div style={{ color: T.sub, fontSize: 12, marginBottom: 5, fontWeight: 600 }}>Vendedor</div>
               <select style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "8px 14px", fontSize: 13, fontFamily: "inherit" }}
@@ -1403,6 +1589,11 @@ Seja encorajador mas direto. Use dados específicos.`;
                 <option value="">Selecione...</option>
                 {sellers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
+            </div>
+          )}
+          {isVendedor && (
+            <div style={{color:T.sub,fontSize:13,padding:"8px 14px",background:T.surface,borderRadius:8,border:`1px solid ${T.border}`}}>
+              📊 Relatório de performance: <strong style={{color:T.text}}>{user.name}</strong>
             </div>
           )}
           <button onClick={generateReport} disabled={loading} style={{ background: T.accent, border: "none", borderRadius: 8, color: "#fff", padding: "9px 20px", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1, fontFamily: "inherit" }}>
@@ -1466,7 +1657,10 @@ function SalesTech({ user }) {
     try {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
         body: JSON.stringify({
           model: CLAUDE_MODEL, max_tokens: 1000,
           messages: [{
@@ -1504,7 +1698,10 @@ Responda APENAS em JSON válido, sem markdown, sem texto adicional, no formato:
     try {
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
         body: JSON.stringify({
           model: CLAUDE_MODEL, max_tokens: 1000,
           messages: [{
