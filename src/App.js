@@ -218,19 +218,26 @@ function Dashboard({user,profiles,onNav}){
   const effective=myCalls.filter(c=>c.type==="Atendida").length;
   const convRate=myCalls.length>0?Math.round((effective/myCalls.length)*100):0;
   const visibleClients=user.role==="vendedor"?dashClients.filter(c=>c.responsible===user.id):dashClients;
-  const acionadosCount=visibleClients.filter(c=>dashActs.has(c.id)).length;
+  // acionados: clientes que tiveram atividade no mês/dia selecionado
+  const monthActIds=new Set(allCalls.filter(c=>c.date?.startsWith(dashMonth)).map(c=>c.client_id));
+  const acionadosCount=visibleClients.filter(c=>monthActIds.has(c.id)).length;
   const semAcionamento=visibleClients.length-acionadosCount;
   const acionados=myClients.filter(c=>c.status!=="Lead").length;
   if(loading)return<Spinner/>;
   const now=new Date();
   let volData=[];
+  const volCalls = dateMode==="specific"
+    ? allCalls.filter(c=>c.date===specificDate)
+    : allCalls.filter(c=>c.date?.startsWith(dashMonth));
   if(volFilter==="day"){
-    volData=Array.from({length:24},(_,i)=>({name:`${i}h`,Ligações:myCalls.filter(c=>c.date===today()&&parseInt(c.time||"0")>=i&&parseInt(c.time||"0")<i+1).length})).slice(0,now.getHours()+1);
+    const targetDay = dateMode==="specific"?specificDate:today();
+    volData=Array.from({length:24},(_,i)=>({name:`${i}h`,Ligações:allCalls.filter(c=>c.date===targetDay&&parseInt((c.time||"00").split(":")[0])===i).length})).slice(0,now.getHours()+2);
   }else if(volFilter==="week"){
-    volData=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-d.getDay()+i);const k=d.toISOString().slice(0,10);return{name:d.toLocaleDateString("pt-BR",{weekday:"short"}),Ligações:myCalls.filter(c=>c.date===k).length};});
+    volData=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-d.getDay()+i);const k=d.toISOString().slice(0,10);return{name:d.toLocaleDateString("pt-BR",{weekday:"short"}),Ligações:allCalls.filter(c=>c.date===k).length};});
   }else{
-    const dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
-    volData=Array.from({length:dim},(_,i)=>{const k=`${now.toISOString().slice(0,7)}-${String(i+1).padStart(2,"0")}`;return{name:String(i+1),Ligações:myCalls.filter(c=>c.date===k).length};});
+    const [yr,mo]=dashMonth.split("-");
+    const dim=new Date(parseInt(yr),parseInt(mo),0).getDate();
+    volData=Array.from({length:dim},(_,i)=>{const k=`${dashMonth}-${String(i+1).padStart(2,"0")}`;return{name:String(i+1),Ligações:allCalls.filter(c=>c.date===k).length};});
   }
   const originsData=allOrigins.map(o=>({name:o,value:myCalls.filter(c=>clients.find(cl=>cl.id===c.client_id)?.origin===o).length})).filter(d=>d.value>0);
   const period=dashMonth;
@@ -349,6 +356,102 @@ function Dashboard({user,profiles,onNav}){
 }
 
 // ─── CLIENTS ─────────────────────────────────────────────────
+
+// ─── CLIENT QUICK VIEW (hyperlink modal for tables) ──────────
+function ClientQuickView({ clientId, clientName, onClose }) {
+  const [data, setData] = useState({ calls:[], whats:[], fus:[], meetings:[] });
+  const [loading, setLoading] = useState(true);
+  const [detail, setDetail] = useState(null); // {type, item}
+
+  useEffect(() => {
+    async function load() {
+      const [c,w,f,m] = await Promise.all([
+        supabase.from("calls").select("*").eq("client_id", clientId).order("date", {ascending:false}),
+        supabase.from("whatsapp_logs").select("*").eq("client_id", clientId).order("date", {ascending:false}),
+        supabase.from("followups").select("*").eq("client_id", clientId).order("date", {ascending:false}),
+        supabase.from("meetings").select("*").eq("client_id", clientId).order("date", {ascending:false}),
+      ]);
+      setData({ calls:c.data||[], whats:w.data||[], fus:f.data||[], meetings:m.data||[] });
+      setLoading(false);
+    }
+    load();
+  }, [clientId]);
+
+  const all = [
+    ...data.calls.map(i=>({...i, _type:"Ligação", _icon:"📞", _color:T.accent, _summary:i.obs, _detail:`Tipo: ${i.type} | Resultado: ${i.result} | Duração: ${i.duration}`})),
+    ...data.whats.map(i=>({...i, _type:"WhatsApp", _icon:"💬", _color:T.green, _summary:i.content, _detail:`Tipo: ${i.type} | Status: ${i.status}`})),
+    ...data.fus.map(i=>({...i, _type:"Follow-up", _icon:"⏰", _color:T.yellow, _summary:i.description, _detail:`Tipo: ${i.type} | Status: ${i.status}`})),
+    ...data.meetings.map(i=>({...i, _type:"Reunião", _icon:"📅", _color:T.purple, _summary:i.notes||i.description, _detail:`Status: ${i.status}${i.proposal_status?" | Proposta: "+i.proposal_status:""}${i.lost_reason?" | Motivo: "+i.lost_reason:""}`})),
+  ].sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
+      <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:24,width:620,maxWidth:"95vw",maxHeight:"85vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div style={{fontSize:17,fontWeight:700,color:T.text}}>📋 Histórico — {clientName}</div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:T.muted,fontSize:22,cursor:"pointer"}}>×</button>
+        </div>
+
+        {detail ? (
+          <div>
+            <button onClick={()=>setDetail(null)} style={{background:"none",border:"none",color:T.accent,fontSize:13,cursor:"pointer",marginBottom:16}}>← Voltar ao histórico</button>
+            <Card>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                <span style={{fontSize:22}}>{detail.item._icon}</span>
+                <div>
+                  <div style={{fontWeight:700,color:T.text,fontSize:14}}>{detail.item._type} — {detail.item.date}</div>
+                  <div style={{color:T.muted,fontSize:12}}>{detail.item._detail}</div>
+                </div>
+              </div>
+              <div style={{background:T.surface,borderRadius:8,padding:14,color:T.sub,fontSize:13,lineHeight:1.7,whiteSpace:"pre-wrap"}}>
+                {detail.item._summary || <span style={{color:T.muted,fontStyle:"italic"}}>Sem observações registradas.</span>}
+              </div>
+              {detail.item._type==="Reunião" && detail.item.notes && (
+                <div style={{marginTop:12,background:T.surface,borderRadius:8,padding:14}}>
+                  <div style={{fontSize:12,fontWeight:600,color:T.sub,marginBottom:6}}>📝 Notas da Reunião</div>
+                  <div style={{color:T.sub,fontSize:13,lineHeight:1.7}}>{detail.item.notes}</div>
+                </div>
+              )}
+            </Card>
+          </div>
+        ) : (
+          loading ? <Spinner/> : (
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {all.length===0 && <div style={{color:T.muted,textAlign:"center",padding:32}}>Nenhuma atividade registrada.</div>}
+              {all.map((item,i)=>(
+                <button key={i} onClick={()=>setDetail({item})} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:10,padding:"12px 14px",textAlign:"left",cursor:"pointer",fontFamily:"inherit",width:"100%",transition:"all .15s"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <span style={{fontSize:18}}>{item._icon}</span>
+                    <div style={{flex:1}}>
+                      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:3}}>
+                        <span style={{background:item._color+"22",color:item._color,borderRadius:5,padding:"1px 8px",fontSize:11,fontWeight:700}}>{item._type}</span>
+                        <span style={{color:T.muted,fontSize:11}}>{item.date}</span>
+                      </div>
+                      <div style={{color:T.sub,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:450}}>
+                        {item._summary || <span style={{fontStyle:"italic",color:T.muted}}>Sem observações</span>}
+                      </div>
+                    </div>
+                    <span style={{color:T.accent,fontSize:12}}>Ver →</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Helper hook for client quick view
+function useClientView() {
+  const [view, setView] = useState(null);
+  const open = (clientId, clientName) => setView({clientId, clientName});
+  const close = () => setView(null);
+  const modal = view ? <ClientQuickView clientId={view.clientId} clientName={view.clientName} onClose={close}/> : null;
+  return { open, modal };
+}
+
 function ClientHistory({client,profiles,onClose}){
   const[calls,setCalls]=useState([]);const[whats,setWhats]=useState([]);const[fus,setFus]=useState([]);const[meetings,setMeetings]=useState([]);const[loading,setLoading]=useState(true);
   useEffect(()=>{
@@ -491,25 +594,28 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
     ].filter(Boolean).sort().reverse();
     return dates[0]||null;
   };
-  const getDaysSince=(dateStr)=>{if(!dateStr)return 999;const d=new Date(dateStr);const now=new Date();return Math.floor((now-d)/(1000*60*60*24));};
-  const acionadosCount=visibleAll.filter(c=>{
-    return allCalls.some(a=>a.client_id===c.id)||allWhats.some(a=>a.client_id===c.id)||allFUs.some(a=>a.client_id===c.id)||allMeetings.some(a=>a.client_id===c.id);
-  }).length;
-  const semAcionamento=visibleAll.length-acionadosCount;
+  const getDaysSince=(dateStr)=>{if(!dateStr)return 9999;const d=new Date(dateStr);const now=new Date();return Math.floor((now-d)/(1000*60*60*24));};
+  const acionadosCount=visibleAll.filter(c=>getDaysSince(getLastActivity(c.id))<30).length;
+  const sem30=visibleAll.filter(c=>{const d=getDaysSince(getLastActivity(c.id));return d>=30&&d<60;}).length;
+  const sem60=visibleAll.filter(c=>getDaysSince(getLastActivity(c.id))>=60).length;
   return(
     <div>
       <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
-        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
-          <div style={{fontSize:28,fontWeight:800,color:T.accent}}>{visibleAll.length}</div>
+        <Card style={{flex:1,minWidth:130,textAlign:"center"}}>
+          <div style={{fontSize:26,fontWeight:800,color:T.accent}}>{visibleAll.length}</div>
           <div style={{fontSize:11,color:T.muted,marginTop:4}}>Total de Clientes</div>
         </Card>
-        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
-          <div style={{fontSize:28,fontWeight:800,color:T.green}}>{acionadosCount}</div>
-          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Clientes Acionados</div>
+        <Card style={{flex:1,minWidth:130,textAlign:"center"}}>
+          <div style={{fontSize:26,fontWeight:800,color:T.green}}>{acionadosCount}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Acionados (últimos 30d)</div>
         </Card>
-        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
-          <div style={{fontSize:28,fontWeight:800,color:semAcionamento>0?T.red:T.muted}}>{semAcionamento}</div>
-          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Sem Acionamento</div>
+        <Card style={{flex:1,minWidth:130,textAlign:"center",border:`1px solid ${T.yellow}30`}}>
+          <div style={{fontSize:26,fontWeight:800,color:T.yellow}}>{sem30}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Sem Acionamento 30-60d</div>
+        </Card>
+        <Card style={{flex:1,minWidth:130,textAlign:"center",border:`1px solid ${T.red}30`}}>
+          <div style={{fontSize:26,fontWeight:800,color:T.red}}>{sem60}</div>
+          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Sem Acionamento +60d</div>
         </Card>
       </div>
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
@@ -597,10 +703,12 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
 
 // ─── CALLS ───────────────────────────────────────────────────
 function Calls({user,profiles,preClient,onSaved}){
+  const {open:openView, modal:viewModal} = useClientView();
   const[calls,setCalls]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);const[schedMeeting,setSchedMeeting]=useState(false);
   const emptyForm={client_id:"",date:today(),time:nowTime(),type:"Atendida",duration_min:"0",duration_sec:"0",obs:"",result:"Retornar"};
   const[form,setForm]=useState(emptyForm);
+  const[fuForm,setFuForm]=useState({active:false,date:"",type:"Ligação",description:""});
   const[fType,setFType]=useState("");const[fResult,setFResult]=useState("");const[fDate,setFDate]=useState("");
   const load=useCallback(async()=>{
     const[c,cl]=await Promise.all([supabase.from("calls").select("*").order("created_at",{ascending:false}),supabase.from("clients").select("id,name,responsible,whatsapp")]);
@@ -614,10 +722,13 @@ function Calls({user,profiles,preClient,onSaved}){
     if(!form.client_id)return alert("Selecione um cliente.");
     const duration=`${form.duration_min}min ${form.duration_sec}s`;
     await supabase.from("calls").insert({...form,duration,user_id:user.id,client_id:form.client_id});
-    if(schedMeeting)alert("Ligação salva! Agende a reunião na aba Reuniões.");
+    if(fuForm.active && fuForm.date){
+      await supabase.from("followups").insert({client_id:form.client_id,user_id:user.id,date:fuForm.date,type:fuForm.type,description:fuForm.description,status:"Pendente"});
+    }
     const savedClient = myClients.find(c=>c.id===form.client_id);
-    await load();setModal(false);setSchedMeeting(false);
-    if(onSaved && savedClient) onSaved(savedClient);
+    await load();setModal(false);setFuForm({active:false,date:"",type:"Ligação",description:""});
+    if(schedMeeting && savedClient) { setSchedMeeting(false); if(onSaved) onSaved(savedClient); }
+    else if(onSaved && savedClient && !schedMeeting) onSaved(savedClient);
   }
   if(loading)return<Spinner/>;
   return(
@@ -638,7 +749,7 @@ function Calls({user,profiles,preClient,onSaved}){
             {myCalls.length===0&&<tr><td colSpan={7} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhuma ligação registrada.</td></tr>}
             {myCalls.map(c=>(
               <tr key={c.id} style={{borderBottom:`1px solid ${T.border}15`}}>
-                <td style={{padding:"10px 12px",color:T.text,fontWeight:600}}>{clients.find(cl=>cl.id===c.client_id)?.name||"—"}</td>
+                <td style={{padding:"10px 12px"}}>{(()=>{const cl=clients.find(cl=>cl.id===c.client_id);return cl?<button onClick={()=>openView(cl.id,cl.name)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit"}}>{cl.name}</button>:<span style={{color:T.muted}}>—</span>;})()}</td>
                 <td style={{padding:"10px 12px",color:T.sub}}>{c.date}</td>
                 <td style={{padding:"10px 12px",color:T.sub}}>{c.time}</td>
                 <td style={{padding:"10px 12px"}}><Badge color={c.type==="Atendida"?T.green:c.type==="Não atendida"?T.red:T.yellow}>{c.type}</Badge></td>
@@ -665,6 +776,17 @@ function Calls({user,profiles,preClient,onSaved}){
           <Input label="Duração — Segundos" value={form.duration_sec} onChange={v=>setForm(f=>({...f,duration_sec:v}))} type="number" min="0" max="59"/>
         </div>
         <Input label="Observações" value={form.obs} onChange={v=>setForm(f=>({...f,obs:v}))} placeholder="Detalhes da ligação..."/>
+        <div style={{background:T.surface,borderRadius:8,border:`1px solid ${T.border}`,padding:"12px 14px",marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:fuForm.active?12:0}}>
+            <input type="checkbox" id="fu_calls" checked={fuForm.active} onChange={e=>setFuForm(f=>({...f,active:e.target.checked}))}/>
+            <label htmlFor="fu_calls" style={{color:T.sub,fontSize:13,cursor:"pointer",fontWeight:600}}>📌 Agendar Follow-up</label>
+          </div>
+          {fuForm.active&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px",marginTop:8}}>
+            <Input label="Data" value={fuForm.date} onChange={v=>setFuForm(f=>({...f,date:v}))} type="date"/>
+            <Input label="Tipo" value={fuForm.type} onChange={v=>setFuForm(f=>({...f,type:v}))} options={["Ligação","WhatsApp","Reunião"]}/>
+            <div style={{gridColumn:"1/-1"}}><Input label="Descrição" value={fuForm.description} onChange={v=>setFuForm(f=>({...f,description:v}))} placeholder="O que fazer?"/></div>
+          </div>}
+        </div>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.surface,borderRadius:8,border:`1px solid ${T.border}`}}>
           <input type="checkbox" id="sm" checked={schedMeeting} onChange={e=>setSchedMeeting(e.target.checked)}/>
           <label htmlFor="sm" style={{color:T.sub,fontSize:13,cursor:"pointer"}}>📅 Após salvar, lembrar de agendar reunião</label>
@@ -674,16 +796,20 @@ function Calls({user,profiles,preClient,onSaved}){
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+      {viewModal}
     </div>
   );
 }
 
 // ─── WHATSAPP ────────────────────────────────────────────────
 function Whatsapp({user,preClient,onSaved}){
+  const {open:openView, modal:viewModal} = useClientView();
   const[whats,setWhats]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);
   const emptyForm={client_id:"",date:today(),time:nowTime(),type:"Enviado",content:"",status:"Enviado"};
   const[form,setForm]=useState(emptyForm);
+  const[fuFormW,setFuFormW]=useState({active:false,date:"",type:"WhatsApp",description:""});
+  const[schedMeetingW,setSchedMeetingW]=useState(false);
   const[fType,setFType]=useState("");const[fStatus,setFStatus]=useState("");const[fDate,setFDate]=useState("");
   const load=useCallback(async()=>{
     const[w,c]=await Promise.all([supabase.from("whatsapp_logs").select("*").order("created_at",{ascending:false}),supabase.from("clients").select("id,name,responsible,whatsapp")]);
@@ -714,7 +840,7 @@ function Whatsapp({user,preClient,onSaved}){
             {myWhats.length===0&&<tr><td colSpan={7} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhuma conversa registrada.</td></tr>}
             {myWhats.map(w=>(
               <tr key={w.id} style={{borderBottom:`1px solid ${T.border}15`}}>
-                <td style={{padding:"10px 12px",color:T.text,fontWeight:600}}>{clients.find(c=>c.id===w.client_id)?.name||"—"}</td>
+                <td style={{padding:"10px 12px"}}>{(()=>{const cl=clients.find(c=>c.id===w.client_id);return cl?<button onClick={()=>openView(cl.id,cl.name)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit"}}>{cl.name}</button>:<span style={{color:T.muted}}>—</span>;})()}</td>
                 <td style={{padding:"10px 12px",color:T.sub}}>{w.date}</td>
                 <td style={{padding:"10px 12px",color:T.sub}}>{w.time||"—"}</td>
                 <td style={{padding:"10px 12px"}}><Badge color={w.type==="Enviado"?T.accent:T.green}>{w.type}</Badge></td>
@@ -739,17 +865,34 @@ function Whatsapp({user,preClient,onSaved}){
           <Input label="Status" value={form.status} onChange={v=>setForm(f=>({...f,status:v}))} options={["Enviado","Visualizado","Respondido"]}/>
         </div>
         <Input label="Conteúdo / Resumo" value={form.content} onChange={v=>setForm(f=>({...f,content:v}))} placeholder="Descreva o conteúdo..."/>
+        <div style={{background:T.surface,borderRadius:8,border:`1px solid ${T.border}`,padding:"12px 14px",marginBottom:14}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:fuFormW.active?12:0}}>
+            <input type="checkbox" id="fu_w" checked={fuFormW.active} onChange={e=>setFuFormW(f=>({...f,active:e.target.checked}))}/>
+            <label htmlFor="fu_w" style={{color:T.sub,fontSize:13,cursor:"pointer",fontWeight:600}}>📌 Agendar Follow-up</label>
+          </div>
+          {fuFormW.active&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px",marginTop:8}}>
+            <Input label="Data" value={fuFormW.date} onChange={v=>setFuFormW(f=>({...f,date:v}))} type="date"/>
+            <Input label="Tipo" value={fuFormW.type} onChange={v=>setFuFormW(f=>({...f,type:v}))} options={["Ligação","WhatsApp","Reunião"]}/>
+            <div style={{gridColumn:"1/-1"}}><Input label="Descrição" value={fuFormW.description} onChange={v=>setFuFormW(f=>({...f,description:v}))} placeholder="O que fazer?"/></div>
+          </div>}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.surface,borderRadius:8,border:`1px solid ${T.border}`}}>
+          <input type="checkbox" id="smw" checked={schedMeetingW} onChange={e=>setSchedMeetingW(e.target.checked)}/>
+          <label htmlFor="smw" style={{color:T.sub,fontSize:13,cursor:"pointer"}}>📅 Após salvar, lembrar de agendar reunião</label>
+        </div>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+      {viewModal}
     </div>
   );
 }
 
 // ─── FOLLOW-UPS ──────────────────────────────────────────────
 function Followups({user,preClient}){
+  const {open:openView, modal:viewModal} = useClientView();
   const[fus,setFus]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);
   const emptyForm={client_id:"",date:today(),type:"Ligação",description:"",status:"Pendente"};
@@ -784,7 +927,7 @@ function Followups({user,preClient}){
             {myFUs.length===0&&<tr><td colSpan={6} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhum follow-up agendado.</td></tr>}
             {myFUs.map(f=>(
               <tr key={f.id} style={{borderBottom:`1px solid ${T.border}15`,opacity:f.status==="Concluído"?.65:1}}>
-                <td style={{padding:"10px 12px",color:T.text,fontWeight:600}}>{clients.find(c=>c.id===f.client_id)?.name||"—"}</td>
+                <td style={{padding:"10px 12px"}}>{(()=>{const cl=clients.find(c=>c.id===f.client_id);return cl?<button onClick={()=>openView(cl.id,cl.name)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit"}}>{cl.name}</button>:<span style={{color:T.muted}}>—</span>;})()}</td>
                 <td style={{padding:"10px 12px",color:f.date<today()&&f.status==="Pendente"?T.red:T.sub}}>{f.date}</td>
                 <td style={{padding:"10px 12px"}}><Badge color={f.type==="Ligação"?T.accent:f.type==="WhatsApp"?T.green:T.purple}>{f.type}</Badge></td>
                 <td style={{padding:"10px 12px",color:T.sub,maxWidth:180}}>{f.description}</td>
@@ -816,6 +959,7 @@ function Followups({user,preClient}){
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+      {viewModal}
     </div>
   );
 }
@@ -826,6 +970,9 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
   const[modal,setModal]=useState(false);
   const emptyForm={client_id:"",title:"",date:today(),time:"09:00",duration_min:"30",location:"",description:"",status:"Agendada",participants:""};
   const[form,setForm]=useState(emptyForm);
+  const[docs,setDocs]=useState({}); // {meetingId: [{name,url,date}]}
+  const[addDocId,setAddDocId]=useState(null); // which meeting to add doc to
+  const[docFile,setDocFile]=useState(null);
   const[fStatus,setFStatus]=useState("");const[fDate,setFDate]=useState("");
   const load=useCallback(async()=>{
     const[m,c]=await Promise.all([supabase.from("meetings").select("*").order("date").order("time"),supabase.from("clients").select("id,name,responsible")]);
@@ -843,6 +990,21 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
   }
   async function updateStatus(id,status){await supabase.from("meetings").update({status}).eq("id",id);await load();}
   const SC={Agendada:T.accent,Realizada:T.green,Cancelada:T.red,Reagendada:T.yellow};
+  // Load docs from localStorage
+  useEffect(()=>{
+    try{const d=localStorage.getItem("krcf_meeting_docs");if(d)setDocs(JSON.parse(d));}catch{}
+  },[]);
+  function saveDocs(d){setDocs(d);localStorage.setItem("krcf_meeting_docs",JSON.stringify(d));}
+  function addDoc(meetingId){
+    if(!docFile)return alert("Selecione um arquivo.");
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const newDoc={name:docFile.name,url:ev.target.result,date:today(),size:Math.round(docFile.size/1024)+"KB"};
+      const updated={...docs,[meetingId]:[...(docs[meetingId]||[]),newDoc]};
+      saveDocs(updated);setAddDocId(null);setDocFile(null);
+    };
+    reader.readAsDataURL(docFile);
+  }
   if(loading)return<Spinner/>;
   return(
     <div>
@@ -870,16 +1032,32 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
                 {m.participants&&<span style={{color:T.sub,fontSize:12}}>👤 {m.participants}</span>}
               </div>
               {m.description&&<div style={{color:T.muted,fontSize:12,marginTop:6}}>{m.description}</div>}
+            {/* Documents */}
+            {(docs[m.id]||[]).length>0&&(
+              <div style={{marginTop:10,borderTop:`1px solid ${T.border}`,paddingTop:10}}>
+                <div style={{fontSize:11,fontWeight:600,color:T.muted,marginBottom:6}}>📎 Documentos</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {(docs[m.id]||[]).map((doc,di)=>(
+                    <a key={di} href={doc.url} download={doc.name} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"4px 10px",fontSize:11,color:T.accent,textDecoration:"none",display:"flex",alignItems:"center",gap:4}}>
+                      📄 {doc.name} <span style={{color:T.muted}}>({doc.size})</span>
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
             </div>
-            {m.status==="Agendada"&&<div style={{display:"flex",gap:6,flexShrink:0}}>
-              <Btn size="sm" variant="success" onClick={()=>{
-                    const cn=clients.find(c=>c.id===m.client_id)?.name||"—";
-                    if(onMarkRealizada) onMarkRealizada(m,cn);
-                    else updateStatus(m.id,"Realizada");
-                  }}>✓ Realizada</Btn>
-              <Btn size="sm" variant="ghost" onClick={()=>updateStatus(m.id,"Reagendada")}>↺ Reagendar</Btn>
-              <Btn size="sm" variant="danger" onClick={()=>updateStatus(m.id,"Cancelada")}>✕</Btn>
-            </div>}
+            <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0,alignItems:"flex-end"}}>
+              {m.status==="Agendada"&&<div style={{display:"flex",gap:6}}>
+                <Btn size="sm" variant="success" onClick={()=>{
+                      const cn=clients.find(c=>c.id===m.client_id)?.name||"—";
+                      if(onMarkRealizada) onMarkRealizada(m,cn);
+                      else updateStatus(m.id,"Realizada");
+                    }}>✓ Realizada</Btn>
+                <Btn size="sm" variant="ghost" onClick={()=>updateStatus(m.id,"Reagendada")}>↺</Btn>
+                <Btn size="sm" variant="danger" onClick={()=>updateStatus(m.id,"Cancelada")}>✕</Btn>
+              </div>}
+              <Btn size="sm" variant="ghost" onClick={()=>setAddDocId(m.id)} style={{fontSize:11}}>📎 Anexar</Btn>
+            </div>
           </Card>
         ))}
       </div>}
@@ -899,11 +1077,29 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
         <Input label="Local / Link" value={form.location} onChange={v=>setForm(f=>({...f,location:v}))} placeholder="Ex: Sala 2 / meet.google.com/..."/>
         <Input label="Participantes" value={form.participants} onChange={v=>setForm(f=>({...f,participants:v}))} placeholder="Ex: João, Maria..."/>
         <Input label="Pauta / Descrição" value={form.description} onChange={v=>setForm(f=>({...f,description:v}))} placeholder="O que será discutido..."/>
+        <div style={{marginBottom:14}}>
+          <div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>📎 Anexar Documentos (opcional)</div>
+          <input type="file" multiple onChange={e=>setDocFile(e.target.files[0])} style={{color:T.sub,fontSize:12}}/>
+          {docFile&&<div style={{color:T.muted,fontSize:11,marginTop:4}}>Arquivo selecionado: {docFile.name}</div>}
+        </div>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+      {/* Add doc modal */}
+      {addDocId&&(
+        <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setAddDocId(null)}>
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:24,width:400,maxWidth:"95vw"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:16}}>📎 Anexar Documento</div>
+            <input type="file" onChange={e=>setDocFile(e.target.files[0])} style={{color:T.sub,fontSize:13,marginBottom:16,display:"block"}}/>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <Btn variant="ghost" onClick={()=>setAddDocId(null)}>Cancelar</Btn>
+              <Btn onClick={()=>addDoc(addDocId)} disabled={!docFile}>Anexar</Btn>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1237,38 +1433,34 @@ function Settings({user,profiles,loadProfiles}){
 const PROPOSAL_STATUS = ["Em negociação","Proposta enviada","Proposta fechada","Proposta perdida","Aguardando retorno"];
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
-// Helper: chama IA via proxy seguro (sem expor API key no browser)
+// ─── AI CONFIG ───────────────────────────────────────────────
+// Para usar a IA, adicione sua API key da Anthropic abaixo:
+const ANTHROPIC_KEY = ""; // Cole aqui: sk-ant-...
+
 async function callAI(prompt, maxTokens = 1000) {
-  try {
-    // Tenta via Supabase Edge Function primeiro
-    const { data, error } = await supabase.functions.invoke("ai-proxy", {
-      body: { prompt, maxTokens, model: CLAUDE_MODEL }
-    });
-    if (!error && data?.text) return data.text;
-  } catch(e) {}
-  
-  // Fallback: tenta diretamente (funciona no StackBlitz dev mode)
-  try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "anthropic-dangerous-direct-browser-access": "true"
-      },
-      body: JSON.stringify({
-        model: CLAUDE_MODEL, max_tokens: maxTokens,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
-    if (!r.ok) {
-      const e = await r.json();
-      throw new Error(e.error?.message || "API error " + r.status);
-    }
-    const d = await r.json();
-    return d.content?.map(i => i.text || "").join("\n") || "";
-  } catch(e) {
-    throw new Error("IA indisponível: " + e.message);
+  if (!ANTHROPIC_KEY) {
+    throw new Error("Configure a ANTHROPIC_KEY no topo do arquivo (linha com sk-ant-)");
   }
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_KEY,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true"
+    },
+    body: JSON.stringify({
+      model: CLAUDE_MODEL,
+      max_tokens: maxTokens,
+      messages: [{ role: "user", content: prompt }]
+    })
+  });
+  if (!r.ok) {
+    const e = await r.json();
+    throw new Error(e.error?.message || "Erro " + r.status);
+  }
+  const d = await r.json();
+  return d.content?.map(i => i.text || "").join("\n") || "";
 }
 
 // ─── HOOK: NOTIFICAÇÕES 15min ────────────────────────────────
@@ -1863,7 +2055,8 @@ function LeadsSearch({ user, profiles }) {
   function search() {
     if (!query.trim()) return alert("Digite o que procura. Ex: Clínicas em São Paulo");
     const q = encodeURIComponent(`${query} ${city}`);
-    setMapUrl(`https://www.google.com/maps/embed/v1/search?key=AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY&q=${q}`);
+    // Use Google Maps search URL (opens full map)
+    setMapUrl(`https://maps.google.com/maps?q=${q}&output=embed`);
     searchWithAI();
   }
 
@@ -2006,12 +2199,18 @@ Responda APENAS em JSON válido, sem markdown:
 
       {/* Tips */}
       <Card style={{marginTop: 20, background: T.accent+"0A", border: `1px solid ${T.accent}20`}}>
-        <div style={{fontSize: 12, fontWeight: 700, color: T.accent, marginBottom: 8}}>💡 Dicas de Pesquisa</div>
-        <div style={{display: "flex", gap: 20, flexWrap: "wrap"}}>
-          {["Clínicas odontológicas em São Paulo","Indústrias metalúrgicas Campinas","Restaurantes delivery interior SP","Escritórios de contabilidade SP"].map(tip => (
-            <button key={tip} onClick={() => { const parts = tip.split(" em "); setQuery(parts[0]); setCity(parts[1]||""); }}
-              style={{background: "none", border: `1px solid ${T.border}`, borderRadius: 6, color: T.sub, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit"}}>
-              {tip}
+        <div style={{fontSize: 12, fontWeight: 700, color: T.accent, marginBottom: 8}}>💡 Como usar</div>
+        <div style={{color: T.muted, fontSize: 12, lineHeight: 1.8}}>
+          1. Digite o tipo de negócio que procura e a cidade/bairro<br/>
+          2. Clique em <strong style={{color:T.text}}>Pesquisar</strong> para ver no mapa e receber sugestões da IA<br/>
+          3. Clique em <strong style={{color:T.green}}>💾 Salvar Lead</strong> para adicionar o cliente à sua base<br/>
+          4. Use <strong style={{color:T.text}}>↗ Abrir no Google Maps</strong> para ver endereços e telefones reais
+        </div>
+        <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
+          {[["Clínicas","São Paulo"],["Indústrias","Campinas"],["Escritórios","São Paulo"],["Escolas","Ribeirão Preto"],["Farmácias","Santos"]].map(([q,c])=>(
+            <button key={q} onClick={()=>{setQuery(q);setCity(c);}}
+              style={{background:"none",border:`1px solid ${T.border}`,borderRadius:6,color:T.sub,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+              {q} em {c}
             </button>
           ))}
         </div>
