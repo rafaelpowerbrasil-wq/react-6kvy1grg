@@ -166,26 +166,46 @@ function Login({onLogin}){
 
 // ─── DASHBOARD ───────────────────────────────────────────────
 function Dashboard({user,profiles,onNav}){
+  // ── ALL HOOKS FIRST (React rules of hooks) ──
   const{origins:allOrigins}=useLists();
-  const[calls,setCalls]=useState([]);const[clients,setClients]=useState([]);
-  const[followups,setFollowups]=useState([]);const[goals,setGoals]=useState([]);const[loading,setLoading]=useState(true);
-  const[volFilter,setVolFilter]=useState("week");const[goalFilter,setGoalFilter]=useState("day");
+  const[calls,setCalls]=useState([]);
+  const[clients,setClients]=useState([]);
+  const[followups,setFollowups]=useState([]);
+  const[goals,setGoals]=useState([]);
+  const[loading,setLoading]=useState(true);
+  const[volFilter,setVolFilter]=useState("week");
+  const[goalFilter,setGoalFilter]=useState("day");
   const[dashMonth,setDashMonth]=useState(new Date().toISOString().slice(0,7));
   const[campaigns,setDashCampaigns]=useState([]);
+  const[dashClients,setDashClients]=useState([]);
+  const[dashActs,setDashActs]=useState(new Set());
   useEffect(()=>{
     async function load(){
-      const[c,cl,f,g,camp]=await Promise.all([
+      const[c,cl,f,g,camp,dcl,ca,wh,fu,mt]=await Promise.all([
         supabase.from("calls").select("*"),
         supabase.from("clients").select("*"),
         supabase.from("followups").select("*"),
         supabase.from("goals").select("*"),
-        supabase.from("campaigns").select("*")
+        supabase.from("campaigns").select("*"),
+        supabase.from("clients").select("id,responsible"),
+        supabase.from("calls").select("client_id"),
+        supabase.from("whatsapp_logs").select("client_id"),
+        supabase.from("followups").select("client_id"),
+        supabase.from("meetings").select("client_id"),
       ]);
-      setCalls(c.data||[]);setClients(cl.data||[]);setFollowups(f.data||[]);setGoals(g.data||[]);setDashCampaigns(camp.data||[]);setLoading(false);
+      setCalls(c.data||[]);
+      setClients(cl.data||[]);
+      setFollowups(f.data||[]);
+      setGoals(g.data||[]);
+      setDashCampaigns(camp.data||[]);
+      setDashClients(dcl.data||[]);
+      const ids=new Set([...(ca.data||[]),...(wh.data||[]),...(fu.data||[]),...(mt.data||[])].map(a=>a.client_id));
+      setDashActs(ids);
+      setLoading(false);
     }
     load();
   },[]);
-  if(loading)return<Spinner/>;
+  // ── COMPUTED VALUES (after hooks) ──
   const allCalls=user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls;
   const myCalls=allCalls.filter(c=>c.date?.startsWith(dashMonth));
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
@@ -193,27 +213,11 @@ function Dashboard({user,profiles,onNav}){
   const pendFU=myFU.filter(f=>f.status==="Pendente"&&f.date<=today());
   const effective=myCalls.filter(c=>c.type==="Atendida").length;
   const convRate=myCalls.length>0?Math.round((effective/myCalls.length)*100):0;
-  const [dashClients,setDashClients]=useState([]);
-  const [dashActs,setDashActs]=useState(new Set());
-  useEffect(()=>{
-    async function loadExtra(){
-      const[{data:cl},{data:ca},{data:wh},{data:fu},{data:mt}]=await Promise.all([
-        supabase.from("clients").select("id,responsible"),
-        supabase.from("calls").select("client_id"),
-        supabase.from("whatsapp_logs").select("client_id"),
-        supabase.from("followups").select("client_id"),
-        supabase.from("meetings").select("client_id"),
-      ]);
-      setDashClients(cl||[]);
-      const ids=new Set([...(ca||[]),...(wh||[]),...(fu||[]),...(mt||[])].map(a=>a.client_id));
-      setDashActs(ids);
-    }
-    loadExtra();
-  },[]);
   const visibleClients=user.role==="vendedor"?dashClients.filter(c=>c.responsible===user.id):dashClients;
   const acionadosCount=visibleClients.filter(c=>dashActs.has(c.id)).length;
   const semAcionamento=visibleClients.length-acionadosCount;
   const acionados=myClients.filter(c=>c.status!=="Lead").length;
+  if(loading)return<Spinner/>;
   const now=new Date();
   let volData=[];
   if(volFilter==="day"){
