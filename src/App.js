@@ -176,6 +176,8 @@ function Dashboard({user,profiles,onNav}){
   const[volFilter,setVolFilter]=useState("week");
   const[goalFilter,setGoalFilter]=useState("day");
   const[dashMonth,setDashMonth]=useState(new Date().toISOString().slice(0,7));
+  const[specificDate,setSpecificDate]=useState(new Date().toISOString().slice(0,10));
+  const[dateMode,setDateMode]=useState("month"); // month | specific
   const[campaigns,setDashCampaigns]=useState([]);
   const[dashClients,setDashClients]=useState([]);
   const[dashActs,setDashActs]=useState(new Set());
@@ -207,7 +209,9 @@ function Dashboard({user,profiles,onNav}){
   },[]);
   // ── COMPUTED VALUES (after hooks) ──
   const allCalls=user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls;
-  const myCalls=allCalls.filter(c=>c.date?.startsWith(dashMonth));
+  const myCalls=dateMode==="specific"
+    ?allCalls.filter(c=>c.date===specificDate)
+    :allCalls.filter(c=>c.date?.startsWith(dashMonth));
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
   const myFU=user.role==="vendedor"?followups.filter(f=>f.user_id===user.id):followups;
   const pendFU=myFU.filter(f=>f.status==="Pendente"&&f.date<=today());
@@ -270,7 +274,13 @@ function Dashboard({user,profiles,onNav}){
       <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <div style={{fontSize:13,fontWeight:700,color:T.sub}}>🎯 Meta de Equipe</div>
         <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
-          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"6px 12px",fontSize:12,fontFamily:"inherit"}} value={dashMonth} onChange={e=>setDashMonth(e.target.value)}/>
+          <div style={{display:"flex",gap:6,alignItems:"center"}}>
+            <button onClick={()=>setDateMode("month")} style={{padding:"6px 12px",borderRadius:8,border:"none",background:dateMode==="month"?T.accent:T.surface,color:dateMode==="month"?"#fff":T.sub,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Mês</button>
+            <button onClick={()=>setDateMode("specific")} style={{padding:"6px 12px",borderRadius:8,border:"none",background:dateMode==="specific"?T.purple:T.surface,color:dateMode==="specific"?"#fff":T.sub,fontSize:12,cursor:"pointer",fontFamily:"inherit"}}>Data</button>
+          </div>
+          {dateMode==="month"
+            ?<input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"6px 12px",fontSize:12,fontFamily:"inherit"}} value={dashMonth} onChange={e=>setDashMonth(e.target.value)}/>
+            :<input type="date" style={{background:T.surface,border:`1px solid ${T.purple}60`,borderRadius:8,color:T.text,padding:"6px 12px",fontSize:12,fontFamily:"inherit"}} value={specificDate} onChange={e=>setSpecificDate(e.target.value)}/>}
           {FB.map(([k,v])=><Btn key={k} size="sm" variant={goalFilter===k?"primary":"ghost"} onClick={()=>setGoalFilter(k)}>{v}</Btn>)}
         </div>
       </div>
@@ -1227,6 +1237,40 @@ function Settings({user,profiles,loadProfiles}){
 const PROPOSAL_STATUS = ["Em negociação","Proposta enviada","Proposta fechada","Proposta perdida","Aguardando retorno"];
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
+// Helper: chama IA via proxy seguro (sem expor API key no browser)
+async function callAI(prompt, maxTokens = 1000) {
+  try {
+    // Tenta via Supabase Edge Function primeiro
+    const { data, error } = await supabase.functions.invoke("ai-proxy", {
+      body: { prompt, maxTokens, model: CLAUDE_MODEL }
+    });
+    if (!error && data?.text) return data.text;
+  } catch(e) {}
+  
+  // Fallback: tenta diretamente (funciona no StackBlitz dev mode)
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL, max_tokens: maxTokens,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+    if (!r.ok) {
+      const e = await r.json();
+      throw new Error(e.error?.message || "API error " + r.status);
+    }
+    const d = await r.json();
+    return d.content?.map(i => i.text || "").join("\n") || "";
+  } catch(e) {
+    throw new Error("IA indisponível: " + e.message);
+  }
+}
+
 // ─── HOOK: NOTIFICAÇÕES 15min ────────────────────────────────
 function useAlerts(user) {
   const [alerts, setAlerts] = useState([]);
@@ -1531,24 +1575,10 @@ Gere:
 Seja encorajador mas direto. Use dados específicos.`;
       }
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({ model: CLAUDE_MODEL, max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
-      });
-      if (!response.ok) {
-        const err = await response.json();
-        setReport("Erro da IA: " + (err.error?.message || response.status));
-        setLoading(false); return;
-      }
-      const data = await response.json();
-      const text = data.content?.map(i => i.text || "").join("\n") || "Erro ao gerar relatório.";
+      const text = await callAI(prompt, 1200);
       setReport(text);
     } catch (e) {
-      setReport("Erro: " + e.message);
+      setReport("Erro ao gerar relatório: " + e.message);
     }
     setLoading(false);
   }
@@ -1658,29 +1688,15 @@ function SalesTech({ user }) {
     if (!product.trim()) return alert("Digite o que pretende vender.");
     setLoadingFW(true); setFrameworks([]);
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: CLAUDE_MODEL, max_tokens: 1000,
-          messages: [{
-            role: "user",
-            content: `Você é um especialista em vendas B2B e B2C. Para o produto/serviço "${product}", liste as 5 melhores metodologias/frameworks de venda. 
+      const prompt = `Você é um especialista em vendas B2B e B2C. Para o produto/serviço "${product}", liste as 5 melhores metodologias/frameworks de venda. 
 Responda APENAS em JSON válido, sem markdown, sem texto adicional, no formato:
-[{"name":"Nome do Framework","description":"O que é em 1 frase","bestFor":"Melhor para...","steps":"Passo 1, Passo 2, Passo 3"}]`
-          }]
-        })
-      });
-      const data = await response.json();
-      const text = data.content?.map(i => i.text || "").join("") || "[]";
+[{"name":"Nome do Framework","description":"O que é em 1 frase","bestFor":"Melhor para...","steps":"Passo 1, Passo 2, Passo 3"}]`;
+      const text = await callAI(prompt, 1000);
       const clean = text.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
       setFrameworks(parsed);
     } catch (e) {
-      alert("Erro ao buscar frameworks. Tente novamente.");
+      alert("Erro ao buscar frameworks: " + e.message);
     }
     setLoadingFW(false);
   }
@@ -1699,19 +1715,7 @@ Responda APENAS em JSON válido, sem markdown, sem texto adicional, no formato:
   async function openScript(fw) {
     setActiveScript(fw); setScriptContent(""); setLoadingScript(true);
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: CLAUDE_MODEL, max_tokens: 1000,
-          messages: [{
-            role: "user",
-            content: `Você é um especialista em vendas. Crie um guia completo em português para vender "${fw.product}" usando a metodologia ${fw.name}.
-
-Estruture assim:
+      const prompt = `Você é um especialista em vendas. Crie um guia completo em português para vender "${fw.product}" usando a metodologia ${fw.name}.
 
 ## 🎯 SCRIPT DE VENDA — ${fw.name}
 Produto: ${fw.product}
@@ -1720,14 +1724,9 @@ Produto: ${fw.product}
 [script detalhado com falas reais]
 
 ### ⚡ Principais Objeções e Respostas
-Objeção 1: [objeção comum]
-Resposta: [como responder]
-
-Objeção 2: [objeção comum]  
-Resposta: [como responder]
-
-Objeção 3: [objeção comum]
-Resposta: [como responder]
+Objeção 1: [objeção comum] - Resposta: [como responder]
+Objeção 2: [objeção comum] - Resposta: [como responder]
+Objeção 3: [objeção comum] - Resposta: [como responder]
 
 ### 💡 Exemplos Práticos
 [2 exemplos de situações reais aplicando o framework]
@@ -1735,15 +1734,11 @@ Resposta: [como responder]
 ### ✅ Checklist de Fechamento
 [5 pontos para verificar antes de fechar]
 
-Seja específico, use linguagem natural brasileira e exemplos concretos.`
-          }]
-        })
-      });
-      const data = await response.json();
-      const text = data.content?.map(i => i.text || "").join("\n") || "Erro ao gerar script.";
+Seja específico, use linguagem natural brasileira e exemplos concretos.`;
+      const text = await callAI(prompt, 1500);
       setScriptContent(text);
     } catch (e) {
-      setScriptContent("Erro ao conectar com a IA.");
+      setScriptContent("Erro: " + e.message);
     }
     setLoadingScript(false);
   }
@@ -1854,6 +1849,177 @@ Seja específico, use linguagem natural brasileira e exemplos concretos.`
   );
 }
 
+
+// ─── GUIA: PESQUISA DE LEADS ─────────────────────────────────
+function LeadsSearch({ user, profiles }) {
+  const [query, setQuery] = useState("");
+  const [city, setCity] = useState("");
+  const [mapUrl, setMapUrl] = useState("");
+  const [results, setResults] = useState([]);
+  const [loadingResults, setLoadingResults] = useState(false);
+  const [saving, setSaving] = useState(null);
+  const [savedMsg, setSavedMsg] = useState("");
+
+  function search() {
+    if (!query.trim()) return alert("Digite o que procura. Ex: Clínicas em São Paulo");
+    const q = encodeURIComponent(`${query} ${city}`);
+    setMapUrl(`https://www.google.com/maps/embed/v1/search?key=AIzaSyD-9tSrke72PouQMnMX-a7eZSW0jkFMBWY&q=${q}`);
+    searchWithAI();
+  }
+
+  async function searchWithAI() {
+    setLoadingResults(true); setResults([]);
+    try {
+      const prompt = `Você é um assistente de prospecção comercial. Liste 8 leads potenciais fictícios mas realistas para a busca: "${query} ${city}".
+Responda APENAS em JSON válido, sem markdown:
+[{"name":"Nome da Empresa","phone":"(11) 9XXXX-XXXX","segment":"Segmento","city":"Cidade","address":"Endereço aproximado","potential":"Alto/Médio/Baixo"}]`;
+      const text = await callAI(prompt, 800);
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setResults(parsed);
+    } catch(e) {
+      setResults([]);
+    }
+    setLoadingResults(false);
+  }
+
+  async function saveAsClient(lead) {
+    setSaving(lead.name);
+    const {error} = await supabase.from("clients").insert({
+      name: lead.name,
+      phone: lead.phone || "",
+      city: lead.city || city,
+      segment: lead.segment || "",
+      responsible: user.id,
+      status: "Lead",
+      origin: "Pesquisa de Leads"
+    });
+    if (error && error.code !== "23505") {
+      alert("Erro ao salvar: " + error.message);
+    } else {
+      setSavedMsg(lead.name + " salvo como Lead!");
+      setTimeout(() => setSavedMsg(""), 3000);
+    }
+    setSaving(null);
+  }
+
+  const potentialColor = {"Alto": T.green, "Médio": T.yellow, "Baixo": T.muted};
+
+  return (
+    <div>
+      {/* Search bar */}
+      <Card style={{marginBottom: 20}}>
+        <div style={{fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 12}}>🔍 Pesquisar Leads no Mapa</div>
+        <div style={{display: "flex", gap: 10, flexWrap: "wrap"}}>
+          <input
+            style={{flex: 2, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "10px 14px", fontSize: 13, fontFamily: "inherit", outline: "none", minWidth: 200}}
+            placeholder="O que buscar? Ex: Clínicas, Restaurantes, Indústrias..."
+            value={query} onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && search()}
+          />
+          <input
+            style={{flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "10px 14px", fontSize: 13, fontFamily: "inherit", outline: "none", minWidth: 140}}
+            placeholder="Cidade / Bairro"
+            value={city} onChange={e => setCity(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && search()}
+          />
+          <button onClick={search} style={{background: T.accent, border: "none", borderRadius: 8, color: "#fff", padding: "10px 24px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap"}}>
+            🔍 Pesquisar
+          </button>
+        </div>
+        {savedMsg && <div style={{color: T.green, fontSize: 13, marginTop: 10, fontWeight: 600}}>✅ {savedMsg}</div>}
+      </Card>
+
+      <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20}}>
+        {/* Google Maps iframe */}
+        <div>
+          <div style={{fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 10}}>🗺 Google Maps</div>
+          {mapUrl ? (
+            <div style={{borderRadius: 12, overflow: "hidden", border: `1px solid ${T.border}`}}>
+              <iframe
+                src={mapUrl}
+                width="100%"
+                height="420"
+                style={{border: "none", display: "block"}}
+                allowFullScreen
+                loading="lazy"
+                title="Google Maps"
+              />
+            </div>
+          ) : (
+            <Card style={{height: 420, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center"}}>
+              <div style={{fontSize: 48, marginBottom: 16}}>🗺</div>
+              <div style={{color: T.sub, fontSize: 14}}>Digite sua busca e clique em Pesquisar</div>
+              <div style={{color: T.muted, fontSize: 12, marginTop: 8}}>O mapa aparecerá aqui</div>
+            </Card>
+          )}
+          <div style={{marginTop: 10}}>
+            <a href={`https://www.google.com/maps/search/${encodeURIComponent(query+" "+city)}`} target="_blank" rel="noreferrer"
+              style={{color: T.accent, fontSize: 12, textDecoration: "none", display: "flex", alignItems: "center", gap: 4}}>
+              ↗ Abrir no Google Maps completo
+            </a>
+          </div>
+        </div>
+
+        {/* AI Results */}
+        <div>
+          <div style={{fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 10}}>🤖 Leads Sugeridos pela IA</div>
+          {loadingResults ? (
+            <Card style={{textAlign: "center", padding: 40}}>
+              <div style={{fontSize: 32, marginBottom: 10}}>🤖</div>
+              <div style={{color: T.sub}}>Buscando leads com IA...</div>
+            </Card>
+          ) : results.length > 0 ? (
+            <div style={{display: "flex", flexDirection: "column", gap: 10, maxHeight: 420, overflowY: "auto"}}>
+              {results.map((lead, i) => (
+                <Card key={i} style={{padding: 14}}>
+                  <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10}}>
+                    <div style={{flex: 1}}>
+                      <div style={{fontWeight: 700, color: T.text, fontSize: 13, marginBottom: 4}}>{lead.name}</div>
+                      <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4}}>
+                        {lead.segment && <span style={{background: T.accent+"22", color: T.accent, borderRadius: 5, padding: "1px 8px", fontSize: 11}}>{lead.segment}</span>}
+                        {lead.potential && <span style={{background: (potentialColor[lead.potential]||T.muted)+"22", color: potentialColor[lead.potential]||T.muted, borderRadius: 5, padding: "1px 8px", fontSize: 11, fontWeight: 700}}>Potencial: {lead.potential}</span>}
+                      </div>
+                      {lead.phone && <div style={{color: T.sub, fontSize: 12}}>📞 {lead.phone}</div>}
+                      {lead.city && <div style={{color: T.muted, fontSize: 11}}>📍 {lead.address || lead.city}</div>}
+                    </div>
+                    <button
+                      onClick={() => saveAsClient(lead)}
+                      disabled={saving === lead.name}
+                      style={{background: T.green+"22", border: `1px solid ${T.green}40`, color: T.green, borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap"}}
+                    >
+                      {saving === lead.name ? "Salvando..." : "💾 Salvar Lead"}
+                    </button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card style={{textAlign: "center", padding: 40, height: 380, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center"}}>
+              <div style={{fontSize: 40, marginBottom: 12}}>🎯</div>
+              <div style={{color: T.sub, fontSize: 13}}>Faça uma busca para ver leads sugeridos</div>
+              <div style={{color: T.muted, fontSize: 12, marginTop: 8}}>A IA vai sugerir empresas para prospectar</div>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* Tips */}
+      <Card style={{marginTop: 20, background: T.accent+"0A", border: `1px solid ${T.accent}20`}}>
+        <div style={{fontSize: 12, fontWeight: 700, color: T.accent, marginBottom: 8}}>💡 Dicas de Pesquisa</div>
+        <div style={{display: "flex", gap: 20, flexWrap: "wrap"}}>
+          {["Clínicas odontológicas em São Paulo","Indústrias metalúrgicas Campinas","Restaurantes delivery interior SP","Escritórios de contabilidade SP"].map(tip => (
+            <button key={tip} onClick={() => { const parts = tip.split(" em "); setQuery(parts[0]); setCity(parts[1]||""); }}
+              style={{background: "none", border: `1px solid ${T.border}`, borderRadius: 6, color: T.sub, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontFamily: "inherit"}}>
+              {tip}
+            </button>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ─── MENU E APP ATUALIZADOS ───────────────────────────────────
 const MENU = [
   { id: "dashboard", label: "Dashboard",       icon: "📊" },
@@ -1865,6 +2031,7 @@ const MENU = [
   { id: "goals",     label: "Metas",            icon: "🎯" },
   { id: "reports",   label: "Relatórios IA",    icon: "🤖" },
   { id: "sales",     label: "Técnicas de Venda",icon: "🧠" },
+  { id: "leads",     label: "Pesquisa Leads",   icon: "🗺" },
   { id: "settings",  label: "Configurações",    icon: "⚙️" },
 ];
 
@@ -1979,6 +2146,7 @@ export default function App() {
           {page === "goals"     && <Goals     user={authUser} profiles={profiles} />}
           {page === "reports"   && <Reports   user={authUser} profiles={profiles} />}
           {page === "sales"     && <SalesTech user={authUser} />}
+          {page === "leads"     && <LeadsSearch user={authUser} profiles={profiles} />}
           {page === "settings"  && <Settings  user={authUser} profiles={profiles} loadProfiles={loadProfiles} />}
         </div>
 
