@@ -454,6 +454,7 @@ function useClientView() {
 
 function ClientHistory({client,profiles,onClose}){
   const[calls,setCalls]=useState([]);const[whats,setWhats]=useState([]);const[fus,setFus]=useState([]);const[meetings,setMeetings]=useState([]);const[loading,setLoading]=useState(true);
+  const[detail,setDetail]=useState(null);
   useEffect(()=>{
     async function load(){
       const[c,w,f,m]=await Promise.all([
@@ -468,65 +469,136 @@ function ClientHistory({client,profiles,onClose}){
   },[client.id]);
   const resp=profiles.find(p=>p.id===client.responsible);
   const daysSince=(dateStr)=>{if(!dateStr)return null;const d=new Date(dateStr);const now=new Date();return Math.floor((now-d)/(1000*60*60*24));};
+
   const allActivities=[
-    ...(calls||[]).map(c=>({date:c.date,type:"Ligação",icon:"📞",desc:`${c.type} · ${c.result}`,color:T.accent})),
-    ...(whats||[]).map(w=>({date:w.date,type:"WhatsApp",icon:"💬",desc:`${w.type} · ${w.status}`,color:T.green})),
-    ...(fus||[]).map(f=>({date:f.date,type:"Follow-up",icon:"⏰",desc:`${f.type} · ${f.status}`,color:T.yellow})),
-    ...(meetings||[]).map(m=>({date:m.date,type:"Reunião",icon:"📅",desc:`${m.title} · ${m.status}`,color:T.purple})),
+    ...(calls||[]).map(a=>({...a,_type:"Ligação",_icon:"📞",_color:T.accent,
+      _title:`${a.type} — ${a.result}`,
+      _summary:a.obs,
+      _details:[
+        {label:"Tipo",val:a.type},{label:"Resultado",val:a.result},
+        {label:"Duração",val:a.duration},{label:"Hora",val:a.time}
+      ]
+    })),
+    ...(whats||[]).map(a=>({...a,_type:"WhatsApp",_icon:"💬",_color:T.green,
+      _title:`${a.type} — ${a.status}`,
+      _summary:a.content,
+      _details:[{label:"Tipo",val:a.type},{label:"Status",val:a.status},{label:"Hora",val:a.time}]
+    })),
+    ...(fus||[]).map(a=>({...a,_type:"Follow-up",_icon:"⏰",_color:T.yellow,
+      _title:`${a.type} — ${a.status}`,
+      _summary:a.description,
+      _details:[{label:"Tipo",val:a.type},{label:"Status",val:a.status}]
+    })),
+    ...(meetings||[]).map(a=>({...a,_type:"Reunião",_icon:"📅",_color:T.purple,
+      _title:`${a.title}`,
+      _summary:a.notes||a.description,
+      _details:[
+        {label:"Status",val:a.status},{label:"Proposta",val:a.proposal_status},
+        {label:"Local",val:a.location},{label:"Participantes",val:a.participants},
+        ...(a.lost_reason?[{label:"Motivo perda",val:a.lost_reason}]:[]),
+        ...(a.post_sale_date?[{label:"Pós-venda",val:a.post_sale_date}]:[]),
+      ].filter(d=>d.val)
+    })),
   ].sort((a,b)=>new Date(b.date)-new Date(a.date));
+
   const lastActivity=allActivities[0];
   const daysNoContact=lastActivity?daysSince(lastActivity.date):daysSince(client.created_at);
+
   return(
-    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
-      <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:28,width:680,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>{if(detail)setDetail(null);else onClose();}}>
+      <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:28,width:700,maxWidth:"95vw",maxHeight:"92vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+
+        {detail ? (
+          /* ── DETAIL VIEW ── */
           <div>
-            <div style={{fontSize:20,fontWeight:800,color:T.text,marginBottom:4}}>{client.name}</div>
-            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
-              {client.phone&&<span style={{color:T.sub,fontSize:12}}>📞 {client.phone}</span>}
-              {client.email&&<span style={{color:T.sub,fontSize:12}}>✉️ {client.email}</span>}
-              {resp&&<span style={{color:T.sub,fontSize:12}}>👤 {resp.name}</span>}
-              <Badge color={STATUS_COLORS[client.status]||T.muted}>{client.status}</Badge>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+              <button onClick={()=>setDetail(null)} style={{background:"none",border:"none",color:T.accent,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>← Voltar</button>
+              <span style={{color:T.muted,fontSize:13}}>|</span>
+              <span style={{fontSize:14,fontWeight:700,color:T.text}}>{client.name}</span>
+            </div>
+            <div style={{background:T.surface,borderRadius:12,padding:20,border:`1px solid ${detail._color}40`}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+                <span style={{fontSize:28}}>{detail._icon}</span>
+                <div>
+                  <div style={{fontSize:16,fontWeight:700,color:T.text}}>{detail._title}</div>
+                  <div style={{color:T.muted,fontSize:12,marginTop:2}}>{detail._type} · {detail.date}{detail.time?" às "+detail.time:""}</div>
+                </div>
+              </div>
+              {/* Detail fields */}
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:16}}>
+                {(detail._details||[]).map((d,i)=>(
+                  <div key={i} style={{background:T.card,borderRadius:8,padding:"6px 12px",border:`1px solid ${T.border}`}}>
+                    <div style={{fontSize:10,color:T.muted,marginBottom:2}}>{d.label}</div>
+                    <div style={{fontSize:13,fontWeight:600,color:T.text}}>{d.val||"—"}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Summary / obs */}
+              <div style={{marginTop:8}}>
+                <div style={{fontSize:12,fontWeight:600,color:T.sub,marginBottom:8}}>📝 Resumo / Observações</div>
+                <div style={{background:T.card,borderRadius:10,padding:16,color:detail._summary?T.sub:T.muted,fontSize:13,lineHeight:1.8,fontStyle:detail._summary?"normal":"italic",minHeight:80,whiteSpace:"pre-wrap"}}>
+                  {detail._summary||"Nenhuma observação registrada para esta interação."}
+                </div>
+              </div>
             </div>
           </div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:T.muted,fontSize:24,cursor:"pointer"}}>×</button>
-        </div>
-        <div style={{display:"flex",gap:12,marginBottom:20}}>
-          <Card style={{flex:1,textAlign:"center",padding:12}}>
-            <div style={{fontSize:22,fontWeight:800,color:T.accent}}>{calls.length+whats.length+fus.length+meetings.length}</div>
-            <div style={{fontSize:11,color:T.muted}}>Total atividades</div>
-          </Card>
-          <Card style={{flex:1,textAlign:"center",padding:12}}>
-            <div style={{fontSize:22,fontWeight:800,color:daysNoContact>30?T.red:daysNoContact>7?T.yellow:T.green}}>{daysNoContact??0}d</div>
-            <div style={{fontSize:11,color:T.muted}}>Sem contato</div>
-          </Card>
-          <Card style={{flex:1,textAlign:"center",padding:12}}>
-            <div style={{fontSize:22,fontWeight:800,color:T.purple}}>{meetings.filter(m=>m.proposal_status==="Proposta fechada").length}</div>
-            <div style={{fontSize:11,color:T.muted}}>Propostas fechadas</div>
-          </Card>
-          <Card style={{flex:1,textAlign:"center",padding:12}}>
-            <div style={{fontSize:22,fontWeight:800,color:T.muted}}>{daysSince(client.created_at)}d</div>
-            <div style={{fontSize:11,color:T.muted}}>Dias cadastrado</div>
-          </Card>
-        </div>
-        {loading?<Spinner/>:(
+        ) : (
+          /* ── LIST VIEW ── */
           <div>
-            <div style={{fontSize:13,fontWeight:700,color:T.sub,marginBottom:12}}>📋 Histórico Completo</div>
-            {allActivities.length===0?<div style={{color:T.muted,textAlign:"center",padding:32}}>Nenhuma atividade registrada.</div>
-            :<div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {allActivities.map((a,i)=>(
-                <div key={i} style={{display:"flex",gap:12,alignItems:"center",background:T.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${T.border}`}}>
-                  <span style={{fontSize:18}}>{a.icon}</span>
-                  <div style={{flex:1}}>
-                    <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                      <Badge color={a.color}>{a.type}</Badge>
-                      <span style={{color:T.muted,fontSize:11}}>{a.date}</span>
-                    </div>
-                    <div style={{color:T.sub,fontSize:12,marginTop:2}}>{a.desc}</div>
-                  </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+              <div>
+                <div style={{fontSize:20,fontWeight:800,color:T.text,marginBottom:4}}>{client.name}</div>
+                <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                  {client.phone&&<span style={{color:T.sub,fontSize:12}}>📞 {client.phone}</span>}
+                  {client.email&&<span style={{color:T.sub,fontSize:12}}>✉️ {client.email}</span>}
+                  {resp&&<span style={{color:T.sub,fontSize:12}}>👤 {resp.name}</span>}
+                  <span style={{background:STATUS_COLORS[client.status]+"22",color:STATUS_COLORS[client.status]||T.muted,borderRadius:6,padding:"1px 10px",fontSize:11,fontWeight:700}}>{client.status}</span>
+                </div>
+              </div>
+              <button onClick={onClose} style={{background:"none",border:"none",color:T.muted,fontSize:24,cursor:"pointer"}}>×</button>
+            </div>
+            <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
+              {[
+                {val:calls.length+whats.length+fus.length+meetings.length,label:"Total atividades",color:T.accent},
+                {val:(daysNoContact??0)+"d",label:"Sem contato",color:daysNoContact>30?T.red:daysNoContact>7?T.yellow:T.green},
+                {val:meetings.filter(m=>m.proposal_status==="Proposta fechada").length,label:"Fechadas",color:T.green},
+                {val:daysSince(client.created_at)+"d",label:"Dias cadastrado",color:T.muted},
+              ].map(s=>(
+                <div key={s.label} style={{flex:1,minWidth:100,background:T.surface,borderRadius:10,padding:12,textAlign:"center",border:`1px solid ${T.border}`}}>
+                  <div style={{fontSize:20,fontWeight:800,color:s.color}}>{s.val}</div>
+                  <div style={{fontSize:10,color:T.muted,marginTop:3}}>{s.label}</div>
                 </div>
               ))}
-            </div>}
+            </div>
+            {loading?<Spinner/>:(
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:T.sub,marginBottom:10}}>📋 Histórico Completo — clique para ver detalhes</div>
+                {allActivities.length===0
+                  ?<div style={{color:T.muted,textAlign:"center",padding:32,fontSize:14}}>Nenhuma atividade registrada.</div>
+                  :<div style={{display:"flex",flexDirection:"column",gap:8}}>
+                    {allActivities.map((a,i)=>(
+                      <button key={i} onClick={()=>setDetail(a)}
+                        style={{display:"flex",gap:12,alignItems:"flex-start",background:T.surface,borderRadius:10,padding:"12px 14px",border:`1px solid ${T.border}`,cursor:"pointer",textAlign:"left",width:"100%",fontFamily:"inherit",transition:"border-color .15s"}}
+                        onMouseEnter={e=>e.currentTarget.style.borderColor=a._color}
+                        onMouseLeave={e=>e.currentTarget.style.borderColor=T.border}>
+                        <span style={{fontSize:20,marginTop:2}}>{a._icon}</span>
+                        <div style={{flex:1}}>
+                          <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:4}}>
+                            <span style={{background:a._color+"22",color:a._color,borderRadius:5,padding:"1px 8px",fontSize:11,fontWeight:700}}>{a._type}</span>
+                            <span style={{color:T.muted,fontSize:11}}>{a.date}{a.time?" às "+a.time:""}</span>
+                          </div>
+                          <div style={{color:T.text,fontSize:13,fontWeight:600,marginBottom:2}}>{a._title}</div>
+                          <div style={{color:T.muted,fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:500}}>
+                            {a._summary||<span style={{fontStyle:"italic"}}>Sem observações</span>}
+                          </div>
+                        </div>
+                        <span style={{color:T.accent,fontSize:12,marginTop:4,flexShrink:0}}>Ver →</span>
+                      </button>
+                    ))}
+                  </div>
+                }
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -727,8 +799,8 @@ function Calls({user,profiles,preClient,onSaved}){
     }
     const savedClient = myClients.find(c=>c.id===form.client_id);
     await load();setModal(false);setFuForm({active:false,date:"",type:"Ligação",description:""});
-    if(schedMeeting && savedClient) { setSchedMeeting(false); if(onSaved) onSaved(savedClient); }
-    else if(onSaved && savedClient && !schedMeeting) onSaved(savedClient);
+    if(onSaved && savedClient) onSaved(savedClient, schedMeeting);
+    setSchedMeeting(false);
   }
   if(loading)return<Spinner/>;
   return(
@@ -789,7 +861,7 @@ function Calls({user,profiles,preClient,onSaved}){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.surface,borderRadius:8,border:`1px solid ${T.border}`}}>
           <input type="checkbox" id="sm" checked={schedMeeting} onChange={e=>setSchedMeeting(e.target.checked)}/>
-          <label htmlFor="sm" style={{color:T.sub,fontSize:13,cursor:"pointer"}}>📅 Após salvar, lembrar de agendar reunião</label>
+          <label htmlFor="sm" style={{color:T.sub,fontSize:13,cursor:"pointer"}}>📅 Agendar Reunião</label>
         </div>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
@@ -878,7 +950,7 @@ function Whatsapp({user,preClient,onSaved}){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.surface,borderRadius:8,border:`1px solid ${T.border}`}}>
           <input type="checkbox" id="smw" checked={schedMeetingW} onChange={e=>setSchedMeetingW(e.target.checked)}/>
-          <label htmlFor="smw" style={{color:T.sub,fontSize:13,cursor:"pointer"}}>📅 Após salvar, lembrar de agendar reunião</label>
+          <label htmlFor="smw" style={{color:T.sub,fontSize:13,cursor:"pointer"}}>📅 Agendar Reunião</label>
         </div>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
@@ -970,6 +1042,7 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
   const[modal,setModal]=useState(false);
   const emptyForm={client_id:"",title:"",date:today(),time:"09:00",duration_min:"30",location:"",description:"",status:"Agendada",participants:""};
   const[form,setForm]=useState(emptyForm);
+  const[meetingDetail,setMeetingDetail]=useState(null);
   const[docs,setDocs]=useState({}); // {meetingId: [{name,url,date}]}
   const[addDocId,setAddDocId]=useState(null); // which meeting to add doc to
   const[docFile,setDocFile]=useState(null);
@@ -1021,8 +1094,8 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
           <Card key={m.id} style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:16}}>
             <div style={{flex:1}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
-                <Badge color={SC[m.status]||T.muted}>{m.status}</Badge>
-                <span style={{fontSize:15,fontWeight:700,color:T.text}}>{m.title}</span>
+                <span style={{background:(SC[m.status]||T.muted)+"22",color:SC[m.status]||T.muted,border:`1px solid ${(SC[m.status]||T.muted)}40`,borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>{m.status}</span>
+                <button onClick={()=>setMeetingDetail(m)} style={{background:"none",border:"none",color:T.accent,fontSize:15,fontWeight:700,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit",textAlign:"left"}}>{m.title}</button>
               </div>
               <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
                 <span style={{color:T.sub,fontSize:12}}>👥 {clients.find(c=>c.id===m.client_id)?.name||"—"}</span>
@@ -1087,6 +1160,69 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+      {/* Meeting Detail Modal */}
+      {meetingDetail&&(
+        <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setMeetingDetail(null)}>
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:28,width:660,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20}}>
+              <div>
+                <div style={{fontSize:18,fontWeight:800,color:T.text,marginBottom:4}}>{meetingDetail.title}</div>
+                <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
+                  <span style={{background:(SC[meetingDetail.status]||T.muted)+"22",color:SC[meetingDetail.status]||T.muted,borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>{meetingDetail.status}</span>
+                  {meetingDetail.proposal_status&&<span style={{background:T.purple+"22",color:T.purple,borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>{meetingDetail.proposal_status}</span>}
+                </div>
+              </div>
+              <button onClick={()=>setMeetingDetail(null)} style={{background:"none",border:"none",color:T.muted,fontSize:24,cursor:"pointer"}}>×</button>
+            </div>
+            {/* Info grid */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:20}}>
+              {[
+                {label:"📅 Data",val:`${meetingDetail.date} às ${meetingDetail.time}`},
+                {label:"⏱ Duração",val:`${meetingDetail.duration_min} min`},
+                {label:"📍 Local / Link",val:meetingDetail.location||"—"},
+                {label:"👥 Participantes",val:meetingDetail.participants||"—"},
+                ...(meetingDetail.lost_reason?[{label:"❌ Motivo Perda",val:meetingDetail.lost_reason}]:[]),
+                ...(meetingDetail.post_sale_date?[{label:"🎯 Pós-venda",val:meetingDetail.post_sale_date}]:[]),
+              ].map((f,i)=>(
+                <div key={i} style={{background:T.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${T.border}`}}>
+                  <div style={{fontSize:11,color:T.muted,marginBottom:3}}>{f.label}</div>
+                  <div style={{fontSize:13,fontWeight:600,color:T.text}}>{f.val}</div>
+                </div>
+              ))}
+            </div>
+            {/* Notes */}
+            {(meetingDetail.notes||meetingDetail.description)&&(
+              <div style={{marginBottom:20}}>
+                <div style={{fontSize:12,fontWeight:600,color:T.sub,marginBottom:8}}>📝 Notas / Pauta</div>
+                <div style={{background:T.surface,borderRadius:10,padding:16,color:T.sub,fontSize:13,lineHeight:1.8,whiteSpace:"pre-wrap",border:`1px solid ${T.border}`}}>
+                  {meetingDetail.notes||meetingDetail.description}
+                </div>
+              </div>
+            )}
+            {/* Documents */}
+            <div>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:12,fontWeight:600,color:T.sub}}>📎 Documentos Anexados</div>
+                <button onClick={()=>{setMeetingDetail(null);setAddDocId(meetingDetail.id);}} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.sub,padding:"5px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>+ Anexar</button>
+              </div>
+              {(docs[meetingDetail.id]||[]).length===0
+                ?<div style={{color:T.muted,fontSize:12,padding:"16px 0",fontStyle:"italic"}}>Nenhum documento anexado.</div>
+                :<div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {(docs[meetingDetail.id]||[]).map((doc,di)=>(
+                    <div key={di} style={{display:"flex",alignItems:"center",gap:12,background:T.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${T.border}`}}>
+                      <span style={{fontSize:20}}>📄</span>
+                      <div style={{flex:1}}>
+                        <div style={{color:T.text,fontSize:13,fontWeight:600}}>{doc.name}</div>
+                        <div style={{color:T.muted,fontSize:11}}>{doc.size} · {doc.date}</div>
+                      </div>
+                      <a href={doc.url} download={doc.name} style={{background:T.accent+"22",color:T.accent,border:`1px solid ${T.accent}40`,borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,textDecoration:"none"}}>⬇ Baixar</a>
+                    </div>
+                  ))}
+                </div>}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Add doc modal */}
       {addDocId&&(
         <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setAddDocId(null)}>
@@ -1533,6 +1669,105 @@ function AlertPopup({ alerts, dismiss }) {
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// ─── POST-SAVE QUICK FORMS ───────────────────────────────────
+function PostSaveFUForm({ client, userId, onSaved, onSkip }) {
+  const [date, setDate] = useState("");
+  const [type, setType] = useState("Ligação");
+  const [desc, setDesc] = useState("");
+
+  async function save() {
+    if (!date) return alert("Selecione a data.");
+    await supabase.from("followups").insert({
+      client_id: client.id, user_id: userId,
+      date, type, description: desc, status: "Pendente"
+    });
+    onSaved();
+  }
+
+  return (
+    <div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 12px" }}>
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Data *</div>
+          <input type="date" style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+            value={date} onChange={e=>setDate(e.target.value)} />
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Tipo</div>
+          <select style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+            value={type} onChange={e=>setType(e.target.value)}>
+            {["Ligação","WhatsApp","Reunião"].map(t=><option key={t}>{t}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ marginBottom:16 }}>
+        <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Descrição</div>
+        <input style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+          placeholder="O que fazer?" value={desc} onChange={e=>setDesc(e.target.value)} />
+      </div>
+      <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+        <button onClick={onSkip} style={{ background:"none", border:"none", color:T.muted, fontSize:12, cursor:"pointer" }}>Pular</button>
+        <button onClick={save} style={{ background:T.accent, border:"none", borderRadius:8, color:"#fff", padding:"9px 18px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+          Salvar Follow-up →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PostSaveMeetingForm({ client, userId, onSaved, onSkip }) {
+  const [form, setForm] = useState({ title:"", date:"", time:"09:00", duration_min:"30", location:"", description:"", participants:"", status:"Agendada" });
+
+  async function save() {
+    if (!form.title || !form.date) return alert("Título e data são obrigatórios.");
+    await supabase.from("meetings").insert({ ...form, client_id: client.id, user_id: userId });
+    onSaved();
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom:12 }}>
+        <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Título *</div>
+        <input style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+          placeholder="Ex: Apresentação de proposta" value={form.title} onChange={e=>setForm(f=>({...f,title:e.target.value}))} />
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 12px" }}>
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Data *</div>
+          <input type="date" style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+            value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} />
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Horário</div>
+          <input type="time" style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+            value={form.time} onChange={e=>setForm(f=>({...f,time:e.target.value}))} />
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Duração (min)</div>
+          <input type="number" style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+            value={form.duration_min} onChange={e=>setForm(f=>({...f,duration_min:e.target.value}))} />
+        </div>
+        <div style={{ marginBottom:12 }}>
+          <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Local / Link</div>
+          <input style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+            placeholder="Sala / meet.google.com/..." value={form.location} onChange={e=>setForm(f=>({...f,location:e.target.value}))} />
+        </div>
+      </div>
+      <div style={{ marginBottom:16 }}>
+        <div style={{ color:T.sub, fontSize:12, marginBottom:4, fontWeight:600 }}>Pauta</div>
+        <input style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"8px 12px", fontSize:13, width:"100%", fontFamily:"inherit" }}
+          placeholder="O que será discutido?" value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} />
+      </div>
+      <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
+        <button onClick={onSkip} style={{ background:"none", border:"none", color:T.muted, fontSize:12, cursor:"pointer" }}>Pular</button>
+        <button onClick={save} style={{ background:T.purple, border:"none", borderRadius:8, color:"#fff", padding:"9px 18px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+          ✅ Agendar Reunião
+        </button>
+      </div>
     </div>
   );
 }
@@ -2275,6 +2510,12 @@ export default function App() {
   // Meeting outcome state
   const [meetingOutcome, setMeetingOutcome] = useState({ open: false, meeting: null, clientName: "" });
 
+  // Post-save flow: open FU or Meeting form after saving call/whats
+  const [postSaveFlow, setPostSaveFlow] = useState(null); // {type:'fu'|'meeting', client}
+  const [postSaveMeetingOpen, setPostSaveMeetingOpen] = useState(false);
+  const [postSaveFUOpen, setPostSaveFUOpen] = useState(false);
+  const [postSaveClient, setPostSaveClient] = useState(null);
+
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
@@ -2310,9 +2551,14 @@ export default function App() {
     setPage(target);
   }
 
-  function showFuReminder(client) {
+  function showFuReminder(client, openMeeting = false) {
     if (!client) return;
-    setFuReminder({ open: true, clientName: client.name, clientId: client.id, userId: authUser?.id });
+    setPostSaveClient(client);
+    if (openMeeting) {
+      setPostSaveFUOpen(true);
+    } else {
+      setPostSaveFUOpen(true);
+    }
   }
 
   function showMeetingOutcome(meeting, clientName) {
@@ -2370,6 +2616,43 @@ export default function App() {
 
         {/* GLOBAL MODALS & ALERTS */}
         <AlertPopup alerts={alerts} dismiss={dismiss} />
+        {/* Post-save FU quick modal */}
+        {postSaveFUOpen && postSaveClient && (
+          <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:T.card,border:`1px solid ${T.accent}`,borderRadius:16,padding:28,width:420,maxWidth:"95vw"}}>
+              <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:4}}>📌 Agendar Follow-up</div>
+              <div style={{color:T.sub,fontSize:13,marginBottom:16}}>Para: <strong style={{color:T.text}}>{postSaveClient.name}</strong></div>
+              <PostSaveFUForm
+                client={postSaveClient}
+                userId={authUser?.id}
+                onSaved={()=>{
+                  setPostSaveFUOpen(false);
+                  // Auto-open meeting form after FU
+                  setPostSaveMeetingOpen(true);
+                }}
+                onSkip={()=>{
+                  setPostSaveFUOpen(false);
+                  setPostSaveMeetingOpen(true);
+                }}
+              />
+            </div>
+          </div>
+        )}
+        {/* Post-save Meeting quick modal */}
+        {postSaveMeetingOpen && postSaveClient && (
+          <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:3000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div style={{background:T.card,border:`1px solid ${T.purple}`,borderRadius:16,padding:28,width:480,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}}>
+              <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:4}}>📅 Agendar Reunião</div>
+              <div style={{color:T.sub,fontSize:13,marginBottom:16}}>Para: <strong style={{color:T.text}}>{postSaveClient.name}</strong></div>
+              <PostSaveMeetingForm
+                client={postSaveClient}
+                userId={authUser?.id}
+                onSaved={()=>{setPostSaveMeetingOpen(false);setPostSaveClient(null);}}
+                onSkip={()=>{setPostSaveMeetingOpen(false);setPostSaveClient(null);}}
+              />
+            </div>
+          </div>
+        )}
         <FollowupReminder
           open={fuReminder.open}
           clientName={fuReminder.clientName}
