@@ -10,7 +10,7 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── THEME ───────────────────────────────────────────────────
-const T = {const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
+const T = {
   bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
   accent:"#3B82F6",accentGlow:"#3B82F620",green:"#10B981",red:"#EF4444",
   yellow:"#F59E0B",orange:"#F59E0B",purple:"#8B5CF6",
