@@ -10,7 +10,7 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── THEME ───────────────────────────────────────────────────
-const T = {
+const T = {const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
   bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
   accent:"#3B82F6",accentGlow:"#3B82F620",green:"#10B981",red:"#EF4444",
   yellow:"#F59E0B",orange:"#F59E0B",purple:"#8B5CF6",
@@ -781,7 +781,7 @@ function Calls({user,profiles,preClient,onSaved}){
   const emptyForm={client_id:"",date:today(),time:nowTime(),type:"Atendida",duration_min:"0",duration_sec:"0",obs:"",result:"Retornar"};
   const[form,setForm]=useState(emptyForm);
   const[fuForm,setFuForm]=useState({active:false,date:"",type:"Ligação",description:""});
-  const[fType,setFType]=useState("");const[fResult,setFResult]=useState("");const[fDate,setFDate]=useState("");
+  const[fType,setFType]=useState("");const[fResult,setFResult]=useState("");const[fDate,setFDate]=useState("");const[fMonth,setFMonth]=useState("");
   const load=useCallback(async()=>{
     const[c,cl]=await Promise.all([supabase.from("calls").select("*").order("created_at",{ascending:false}),supabase.from("clients").select("id,name,responsible,whatsapp")]);
     setCalls(c.data||[]);setClients(cl.data||[]);setLoading(false);
@@ -789,7 +789,7 @@ function Calls({user,profiles,preClient,onSaved}){
   useEffect(()=>{load();},[load]);
   useEffect(()=>{if(preClient){setForm(f=>({...f,client_id:preClient.id}));setModal(true);}}, [preClient]);
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
-  const myCalls=(user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls).filter(c=>(!fType||c.type===fType)&&(!fResult||c.result===fResult)&&(!fDate||c.date===fDate));
+  const myCalls=(user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls).filter(c=>(!fType||c.type===fType)&&(!fResult||c.result===fResult)&&(!fDate||c.date===fDate)&&(!fMonth||c.date?.startsWith(fMonth)));
   async function save(){
     if(!form.client_id)return alert("Selecione um cliente.");
     const duration=`${form.duration_min}min ${form.duration_sec}s`;
@@ -805,7 +805,13 @@ function Calls({user,profiles,preClient,onSaved}){
   if(loading)return<Spinner/>;
   return(
     <div>
-      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}><Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Registrar Ligação</Btn></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16,gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fMonth} onChange={e=>setFMonth(e.target.value)}/>
+          <input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fDate} onChange={e=>setFDate(e.target.value)}/>
+        </div>
+        <Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Registrar Ligação</Btn>
+      </div>
       <Card style={{padding:0,overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead><tr>
@@ -882,7 +888,7 @@ function Whatsapp({user,preClient,onSaved}){
   const[form,setForm]=useState(emptyForm);
   const[fuFormW,setFuFormW]=useState({active:false,date:"",type:"WhatsApp",description:""});
   const[schedMeetingW,setSchedMeetingW]=useState(false);
-  const[fType,setFType]=useState("");const[fStatus,setFStatus]=useState("");const[fDate,setFDate]=useState("");
+  const[fType,setFType]=useState("");const[fStatus,setFStatus]=useState("");const[fDate,setFDate]=useState("");const[fMonth,setFMonth]=useState("");
   const load=useCallback(async()=>{
     const[w,c]=await Promise.all([supabase.from("whatsapp_logs").select("*").order("created_at",{ascending:false}),supabase.from("clients").select("id,name,responsible,whatsapp")]);
     setWhats(w.data||[]);setClients(c.data||[]);setLoading(false);
@@ -890,13 +896,22 @@ function Whatsapp({user,preClient,onSaved}){
   useEffect(()=>{load();},[load]);
   useEffect(()=>{if(preClient){setForm(f=>({...f,client_id:preClient.id}));setModal(true);}}, [preClient]);
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
-  const myWhats=(user.role==="vendedor"?whats.filter(w=>w.user_id===user.id):whats).filter(w=>(!fType||w.type===fType)&&(!fStatus||w.status===fStatus)&&(!fDate||w.date===fDate));
-  async function save(){if(!form.client_id)return alert("Selecione um cliente.");await supabase.from("whatsapp_logs").insert({...form,user_id:user.id});await load();setModal(false);}
+  const myWhats=(user.role==="vendedor"?whats.filter(w=>w.user_id===user.id):whats).filter(w=>(!fType||w.type===fType)&&(!fStatus||w.status===fStatus)&&(!fDate||w.date===fDate)&&(!fMonth||w.date?.startsWith(fMonth)));
+  async function save(){
+    if(!form.client_id)return alert("Selecione um cliente.");
+    const {error:wErr}=await supabase.from("whatsapp_logs").insert({...form,user_id:user.id});
+    if(wErr){alert("Erro ao salvar WhatsApp: "+wErr.message);return;}await load();setModal(false);}
   function openWhatsApp(clientId){const c=clients.find(c=>c.id===clientId);if(!c?.whatsapp)return alert("Cliente sem WhatsApp cadastrado.");const num=c.whatsapp.replace(/\D/g,"");window.open(`https://wa.me/55${num}`,"_blank");}
   if(loading)return<Spinner/>;
   return(
     <div>
-      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}><Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Registrar WhatsApp</Btn></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16,gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fMonth} onChange={e=>setFMonth(e.target.value)}/>
+          <input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fDate} onChange={e=>setFDate(e.target.value)}/>
+        </div>
+        <Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Registrar WhatsApp</Btn>
+      </div>
       <Card style={{padding:0,overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead><tr>
@@ -967,9 +982,15 @@ function Followups({user,preClient}){
   const {open:openView, modal:viewModal} = useClientView();
   const[fus,setFus]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);
-  const emptyForm={client_id:"",date:today(),type:"Ligação",description:"",status:"Pendente"};
+  const emptyForm={client_id:"",date:today(),type:"Ligação",description:"",title:"",status:"Pendente"};
   const[form,setForm]=useState(emptyForm);
-  const[fType,setFType]=useState("");const[fSt,setFSt]=useState("");const[fDate,setFDate]=useState("");
+  const[fType,setFType]=useState("");const[fSt,setFSt]=useState("");const[fDate,setFDate]=useState("");const[fMonth,setFMonth]=useState("");
+  // Conclude flow
+  const[concludeModal,setConcludeModal]=useState(false);
+  const[concludeFU,setConcludeFU]=useState(null);
+  const[concludeType,setConcludeType]=useState(""); // "Ligação" or "WhatsApp"
+  const[regModal,setRegModal]=useState(false);
+  const[regForm,setRegForm]=useState({type:"Atendida",result:"Interesse",obs:"",content:"",status:"Enviado"});
   const load=useCallback(async()=>{
     const[f,c]=await Promise.all([supabase.from("followups").select("*").order("date"),supabase.from("clients").select("id,name,responsible")]);
     setFus(f.data||[]);setClients(c.data||[]);setLoading(false);
@@ -977,14 +998,52 @@ function Followups({user,preClient}){
   useEffect(()=>{load();},[load]);
   useEffect(()=>{if(preClient){setForm(f=>({...f,client_id:preClient.id}));setModal(true);}}, [preClient]);
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
-  const myFUs=(user.role==="vendedor"?fus.filter(f=>f.user_id===user.id):fus).filter(f=>(!fType||f.type===fType)&&(!fSt||f.status===fSt)&&(!fDate||f.date===fDate));
+  const today_str=today();
+  const myFUsRaw=user.role==="vendedor"?fus.filter(f=>f.user_id===user.id):fus;
+  const myFUs=myFUsRaw.map(f=>({...f,status:f.status==="Pendente"&&f.date<today_str?"Atrasado":f.status})).filter(f=>(!fType||f.type===fType)&&(!fSt||f.status===fSt)&&(!fDate||f.date===fDate)&&(!fMonth||f.date?.startsWith(fMonth)));
   async function save(){if(!form.client_id)return alert("Selecione um cliente.");await supabase.from("followups").insert({...form,user_id:user.id});await load();setModal(false);}
-  async function conclude(f){await supabase.from("followups").update({status:f.status==="Pendente"?"Concluído":"Pendente"}).eq("id",f.id);await load();}
+  async function conclude(f){
+    if(f.status==="Concluído"){
+      await supabase.from("followups").update({status:"Pendente"}).eq("id",f.id);
+      await load();
+    } else {
+      setConcludeFU(f); setConcludeType(""); setRegForm({type:"Atendida",result:"Interesse",obs:"",content:"",status:"Enviado"});
+      setConcludeModal(true);
+    }
+  }
+  async function confirmConclude(){
+    if(!concludeType) return alert("Selecione como o follow-up foi finalizado.");
+    // Register the activity
+    if(concludeType==="Ligação"){
+      if(!regForm.obs && !regForm.result) return alert("Preencha ao menos o resultado da ligação.");
+      const{error}=await supabase.from("calls").insert({client_id:concludeFU.client_id,user_id:user.id,date:today(),time:nowTime(),type:regForm.type||"Atendida",result:regForm.result||"Interesse",obs:regForm.obs,duration:"0min 0s"});
+      if(error){alert("Erro ao registrar ligação: "+error.message);return;}
+    } else if(concludeType==="WhatsApp"){
+      if(!regForm.content) return alert("Preencha o conteúdo da mensagem.");
+      const{error}=await supabase.from("whatsapp_logs").insert({client_id:concludeFU.client_id,user_id:user.id,date:today(),time:nowTime(),type:"Enviado",content:regForm.content,status:regForm.status||"Enviado"});
+      if(error){alert("Erro ao registrar WhatsApp: "+error.message);return;}
+    }
+    await supabase.from("followups").update({status:"Concluído"}).eq("id",concludeFU.id);
+    setConcludeModal(false);setConcludeFU(null);setConcludeType("");
+    await load();
+  }
   function newFU(f){setForm({client_id:f.client_id,date:today(),type:f.type,description:"",status:"Pendente"});setModal(true);}
   if(loading)return<Spinner/>;
   return(
     <div>
-      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}><Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Agendar Follow-up</Btn></div>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16,gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fMonth} onChange={e=>setFMonth(e.target.value)} placeholder="Mês"/>
+          <input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fDate} onChange={e=>setFDate(e.target.value)}/>
+          <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fSt} onChange={e=>setFSt(e.target.value)}>
+            <option value="">Todos status</option>{["Pendente","Concluído","Atrasado"].map(s=><option key={s}>{s}</option>)}
+          </select>
+          <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fType} onChange={e=>setFType(e.target.value)}>
+            <option value="">Todos tipos</option>{["Ligação","WhatsApp","Reunião"].map(t=><option key={t}>{t}</option>)}
+          </select>
+        </div>
+        <Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Agendar Follow-up</Btn>
+      </div>
       <Card style={{padding:0,overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead><tr>
@@ -1003,10 +1062,10 @@ function Followups({user,preClient}){
                 <td style={{padding:"10px 12px",color:f.date<today()&&f.status==="Pendente"?T.red:T.sub}}>{f.date}</td>
                 <td style={{padding:"10px 12px"}}><Badge color={f.type==="Ligação"?T.accent:f.type==="WhatsApp"?T.green:T.purple}>{f.type}</Badge></td>
                 <td style={{padding:"10px 12px",color:T.sub,maxWidth:180}}>{f.description}</td>
-                <td style={{padding:"10px 12px"}}><Badge color={f.status==="Pendente"?T.yellow:T.green}>{f.status}</Badge></td>
+                <td style={{padding:"10px 12px"}}><Badge color={f.status==="Atrasado"?T.red:f.status==="Pendente"?T.yellow:T.green}>{f.status}</Badge></td>
                 <td style={{padding:"10px 12px"}}>
                   <div style={{display:"flex",gap:6}}>
-                    <Btn size="sm" variant={f.status==="Pendente"?"success":"ghost"} onClick={()=>conclude(f)}>{f.status==="Pendente"?"✓ Concluir":"↺ Reabrir"}</Btn>
+                    <Btn size="sm" variant={f.status==="Concluído"?"ghost":"success"} onClick={()=>conclude(f)}>{f.status==="Concluído"?"↺ Reabrir":"✓ Concluir"}</Btn>
                     <Btn size="sm" variant="ghost" onClick={()=>newFU(f)}>+ Novo FU</Btn>
                   </div>
                 </td>
@@ -1025,12 +1084,78 @@ function Followups({user,preClient}){
           <Input label="Data" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
           <Input label="Tipo" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={FOLLOWUP_TYPES}/>
         </div>
+        <Input label="Título" value={form.title||""} onChange={v=>setForm(f=>({...f,title:v}))} placeholder="Título do follow-up (opcional)"/>
         <Input label="Descrição" value={form.description} onChange={v=>setForm(f=>({...f,description:v}))}/>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+
+      {/* Conclude Follow-up Modal */}
+      {concludeModal&&concludeFU&&(
+        <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setConcludeModal(false)}>
+          <div style={{background:T.card,border:`1px solid ${T.green}`,borderRadius:16,padding:28,width:500,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:4}}>✅ Concluir Follow-up</div>
+            <div style={{color:T.sub,fontSize:13,marginBottom:20}}>
+              Cliente: <strong style={{color:T.text}}>{clients.find(c=>c.id===concludeFU.client_id)?.name||"—"}</strong><br/>
+              Descrição: {concludeFU.description||concludeFU.title||"—"}
+            </div>
+            <div style={{marginBottom:16}}>
+              <div style={{color:T.sub,fontSize:12,marginBottom:8,fontWeight:600}}>Como foi finalizado? *</div>
+              <div style={{display:"flex",gap:10}}>
+                {["Ligação","WhatsApp"].map(t=>(
+                  <button key={t} onClick={()=>setConcludeType(t)} style={{flex:1,padding:"12px",borderRadius:10,border:`2px solid ${concludeType===t?T.green:T.border}`,background:concludeType===t?T.green+"22":"transparent",color:concludeType===t?T.green:T.sub,fontWeight:700,fontSize:14,cursor:"pointer",fontFamily:"inherit"}}>
+                    {t==="Ligação"?"📞":"💬"} {t}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {concludeType==="Ligação"&&(
+              <div style={{background:T.surface,borderRadius:10,padding:16,marginBottom:16,border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:12,fontWeight:600,color:T.sub,marginBottom:10}}>📞 Dados da Ligação</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+                  <div style={{marginBottom:12}}>
+                    <div style={{color:T.muted,fontSize:11,marginBottom:4}}>Tipo</div>
+                    <select style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,width:"100%",fontFamily:"inherit"}} value={regForm.type} onChange={e=>setRegForm(f=>({...f,type:e.target.value}))}>
+                      {["Atendida","Não atendida","Caixa Postal"].map(t=><option key={t}>{t}</option>)}
+                    </select>
+                  </div>
+                  <div style={{marginBottom:12}}>
+                    <div style={{color:T.muted,fontSize:11,marginBottom:4}}>Resultado *</div>
+                    <select style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,width:"100%",fontFamily:"inherit"}} value={regForm.result} onChange={e=>setRegForm(f=>({...f,result:e.target.value}))}>
+                      {["Interesse","Sem interesse","Retornar"].map(r=><option key={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div style={{gridColumn:"1/-1",marginBottom:12}}>
+                    <div style={{color:T.muted,fontSize:11,marginBottom:4}}>Observações *</div>
+                    <textarea style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,width:"100%",fontFamily:"inherit",resize:"vertical",minHeight:70,boxSizing:"border-box"}} placeholder="Como foi a ligação?" value={regForm.obs} onChange={e=>setRegForm(f=>({...f,obs:e.target.value}))}/>
+                  </div>
+                </div>
+              </div>
+            )}
+            {concludeType==="WhatsApp"&&(
+              <div style={{background:T.surface,borderRadius:10,padding:16,marginBottom:16,border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:12,fontWeight:600,color:T.sub,marginBottom:10}}>💬 Dados do WhatsApp</div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:T.muted,fontSize:11,marginBottom:4}}>Conteúdo / Resumo *</div>
+                  <textarea style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,width:"100%",fontFamily:"inherit",resize:"vertical",minHeight:70,boxSizing:"border-box"}} placeholder="O que foi tratado no WhatsApp?" value={regForm.content} onChange={e=>setRegForm(f=>({...f,content:e.target.value}))}/>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{color:T.muted,fontSize:11,marginBottom:4}}>Status</div>
+                  <select style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,width:"100%",fontFamily:"inherit"}} value={regForm.status} onChange={e=>setRegForm(f=>({...f,status:e.target.value}))}>
+                    {["Enviado","Visualizado","Respondido"].map(s=><option key={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setConcludeModal(false)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:8,color:T.sub,padding:"9px 18px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+              <button onClick={confirmConclude} disabled={!concludeType} style={{background:T.green,border:"none",borderRadius:8,color:"#fff",padding:"9px 20px",fontSize:13,fontWeight:600,cursor:concludeType?"pointer":"not-allowed",opacity:concludeType?1:0.5,fontFamily:"inherit"}}>✅ Registrar e Concluir</button>
+            </div>
+          </div>
+        </div>
+      )}
       {viewModal}
     </div>
   );
@@ -1043,6 +1168,9 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
   const emptyForm={client_id:"",title:"",date:today(),time:"09:00",duration_min:"30",location:"",description:"",status:"Agendada",participants:""};
   const[form,setForm]=useState(emptyForm);
   const[meetingDetail,setMeetingDetail]=useState(null);
+  const[cancelModal,setCancelModal]=useState(false);
+  const[cancelMeetingId,setCancelMeetingId]=useState(null);
+  const[cancelReason,setCancelReason]=useState("");
   const[docs,setDocs]=useState({}); // {meetingId: [{name,url,date}]}
   const[addDocId,setAddDocId]=useState(null); // which meeting to add doc to
   const[docFile,setDocFile]=useState(null);
@@ -1127,7 +1255,7 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
                       else updateStatus(m.id,"Realizada");
                     }}>✓ Realizada</Btn>
                 <Btn size="sm" variant="ghost" onClick={()=>updateStatus(m.id,"Reagendada")}>↺</Btn>
-                <Btn size="sm" variant="danger" onClick={()=>updateStatus(m.id,"Cancelada")}>✕</Btn>
+                <Btn size="sm" variant="danger" onClick={()=>{setCancelMeetingId(m.id);setCancelReason("");setCancelModal(true);}}>✕ Cancelar</Btn>
               </div>}
               <Btn size="sm" variant="ghost" onClick={()=>setAddDocId(m.id)} style={{fontSize:11}}>📎 Anexar</Btn>
             </div>
@@ -1160,6 +1288,28 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+      {/* Cancel Meeting Modal */}
+      {cancelModal&&(
+        <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setCancelModal(false)}>
+          <div style={{background:T.card,border:`1px solid ${T.red}`,borderRadius:14,padding:28,width:420,maxWidth:"95vw"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:4}}>❌ Cancelar Reunião</div>
+            <div style={{color:T.sub,fontSize:13,marginBottom:16}}>Informe o motivo do cancelamento:</div>
+            <textarea style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"10px 12px",fontSize:13,width:"100%",fontFamily:"inherit",resize:"vertical",minHeight:80,boxSizing:"border-box",marginBottom:16}}
+              placeholder="Ex: Cliente pediu para reagendar, reunião desnecessária..."
+              value={cancelReason} onChange={e=>setCancelReason(e.target.value)}/>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setCancelModal(false)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:8,color:T.sub,padding:"9px 18px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Voltar</button>
+              <button onClick={async()=>{
+                if(!cancelReason.trim()){alert("Informe o motivo do cancelamento.");return;}
+                await supabase.from("meetings").update({status:"Cancelada",lost_reason:cancelReason}).eq("id",cancelMeetingId);
+                setCancelModal(false);setCancelMeetingId(null);setCancelReason("");await load();
+              }} style={{background:T.red,border:"none",borderRadius:8,color:"#fff",padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                Confirmar Cancelamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Meeting Detail Modal */}
       {meetingDetail&&(
         <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setMeetingDetail(null)}>
