@@ -2042,179 +2042,198 @@ Seja específico, use linguagem natural brasileira e exemplos concretos.`;
 }
 
 
-// ─── GUIA: PESQUISA DE LEADS ─────────────────────────────────
-function LeadsSearch({ user, profiles }) {
-  const [query, setQuery] = useState("");
-  const [city, setCity] = useState("");
-  const [mapUrl, setMapUrl] = useState("");
-  const [results, setResults] = useState([]);
-  const [loadingResults, setLoadingResults] = useState(false);
-  const [saving, setSaving] = useState(null);
-  const [savedMsg, setSavedMsg] = useState("");
+// ─── GUIA: PESQUISA DE LEADS (Google My Maps) ───────────────
+function LeadsSearch({ user }) {
+  const [mapUrl, setMapUrl] = useState(() => {
+    try { return localStorage.getItem("krcf_mymap_url") || ""; } catch { return ""; }
+  });
+  const [inputUrl, setInputUrl] = useState(mapUrl);
+  const [editingUrl, setEditingUrl] = useState(!mapUrl);
+  const [saveModal, setSaveModal] = useState(false);
+  const [leadForm, setLeadForm] = useState({ name:"", phone:"", email:"", city:"", segment:"", origin:"Pesquisa de Leads" });
+  const [saved, setSaved] = useState("");
 
-  function search() {
-    if (!query.trim()) return alert("Digite o que procura. Ex: Clínicas em São Paulo");
-    const q = encodeURIComponent(`${query} ${city}`);
-    // Use Google Maps search URL (opens full map)
-    setMapUrl(`https://maps.google.com/maps?q=${q}&output=embed`);
-    searchWithAI();
-  }
-
-  async function searchWithAI() {
-    setLoadingResults(true); setResults([]);
-    try {
-      const prompt = `Você é um assistente de prospecção comercial. Liste 8 leads potenciais fictícios mas realistas para a busca: "${query} ${city}".
-Responda APENAS em JSON válido, sem markdown:
-[{"name":"Nome da Empresa","phone":"(11) 9XXXX-XXXX","segment":"Segmento","city":"Cidade","address":"Endereço aproximado","potential":"Alto/Médio/Baixo"}]`;
-      const text = await callAI(prompt, 800);
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      setResults(parsed);
-    } catch(e) {
-      setResults([]);
+  function saveUrl() {
+    if (!inputUrl.trim()) return alert("Cole o link do Google My Maps.");
+    // Accept both embed and regular URLs
+    let url = inputUrl.trim();
+    if (url.includes("/maps/d/") && !url.includes("/embed")) {
+      url = url.replace("/view", "/embed").replace("/edit", "/embed");
+      if (!url.includes("/embed")) url = url + (url.includes("?") ? "&" : "?") + "embedded=true";
     }
-    setLoadingResults(false);
+    localStorage.setItem("krcf_mymap_url", url);
+    setMapUrl(url);
+    setEditingUrl(false);
   }
 
-  async function saveAsClient(lead) {
-    setSaving(lead.name);
-    const {error} = await supabase.from("clients").insert({
-      name: lead.name,
-      phone: lead.phone || "",
-      city: lead.city || city,
-      segment: lead.segment || "",
+  async function saveLead() {
+    if (!leadForm.name) return alert("Nome é obrigatório.");
+    const { error } = await supabase.from("clients").insert({
+      ...leadForm,
       responsible: user.id,
       status: "Lead",
-      origin: "Pesquisa de Leads"
     });
-    if (error && error.code !== "23505") {
-      alert("Erro ao salvar: " + error.message);
-    } else {
-      setSavedMsg(lead.name + " salvo como Lead!");
-      setTimeout(() => setSavedMsg(""), 3000);
-    }
-    setSaving(null);
+    if (error && error.code !== "23505") return alert("Erro: " + error.message);
+    setSaved(leadForm.name + " salvo como Lead! ✅");
+    setLeadForm({ name:"", phone:"", email:"", city:"", segment:"", origin:"Pesquisa de Leads" });
+    setSaveModal(false);
+    setTimeout(() => setSaved(""), 4000);
   }
 
-  const potentialColor = {"Alto": T.green, "Médio": T.yellow, "Baixo": T.muted};
+  const segments = (() => { try { const s = localStorage.getItem("krcf_segments"); return s ? JSON.parse(s) : []; } catch { return []; }})();
+  const origins  = (() => { try { const s = localStorage.getItem("krcf_origins");  return s ? JSON.parse(s) : []; } catch { return []; }})();
 
   return (
     <div>
-      {/* Search bar */}
-      <Card style={{marginBottom: 20}}>
-        <div style={{fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 12}}>🔍 Pesquisar Leads no Mapa</div>
-        <div style={{display: "flex", gap: 10, flexWrap: "wrap"}}>
-          <input
-            style={{flex: 2, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "10px 14px", fontSize: 13, fontFamily: "inherit", outline: "none", minWidth: 200}}
-            placeholder="O que buscar? Ex: Clínicas, Restaurantes, Indústrias..."
-            value={query} onChange={e => setQuery(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && search()}
-          />
-          <input
-            style={{flex: 1, background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, padding: "10px 14px", fontSize: 13, fontFamily: "inherit", outline: "none", minWidth: 140}}
-            placeholder="Cidade / Bairro"
-            value={city} onChange={e => setCity(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && search()}
-          />
-          <button onClick={search} style={{background: T.accent, border: "none", borderRadius: 8, color: "#fff", padding: "10px 24px", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap"}}>
-            🔍 Pesquisar
+      {/* Header bar */}
+      <div style={{ display:"flex", gap:10, alignItems:"center", marginBottom:16, flexWrap:"wrap" }}>
+        <div style={{ flex:1, fontSize:13, color:T.muted }}>
+          {mapUrl ? "🗺 Google My Maps incorporado" : "Configure o link do seu Google My Maps"}
+        </div>
+        {saved && <div style={{ color:T.green, fontWeight:700, fontSize:13 }}>{saved}</div>}
+        <button onClick={()=>setSaveModal(true)} style={{ background:T.green, border:"none", borderRadius:8, color:"#fff", padding:"8px 18px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+          + Salvar Cliente do Mapa
+        </button>
+        {user.role==="admin" && (
+          <button onClick={()=>setEditingUrl(v=>!v)} style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.sub, padding:"8px 14px", fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>
+            ⚙️ {editingUrl ? "Cancelar" : "Configurar Mapa"}
           </button>
-        </div>
-        {savedMsg && <div style={{color: T.green, fontSize: 13, marginTop: 10, fontWeight: 600}}>✅ {savedMsg}</div>}
-      </Card>
-
-      <div style={{display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20}}>
-        {/* Google Maps iframe */}
-        <div>
-          <div style={{fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 10}}>🗺 Google Maps</div>
-          {mapUrl ? (
-            <div style={{borderRadius: 12, overflow: "hidden", border: `1px solid ${T.border}`}}>
-              <iframe
-                src={mapUrl}
-                width="100%"
-                height="420"
-                style={{border: "none", display: "block"}}
-                allowFullScreen
-                loading="lazy"
-                title="Google Maps"
-              />
-            </div>
-          ) : (
-            <Card style={{height: 420, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center"}}>
-              <div style={{fontSize: 48, marginBottom: 16}}>🗺</div>
-              <div style={{color: T.sub, fontSize: 14}}>Digite sua busca e clique em Pesquisar</div>
-              <div style={{color: T.muted, fontSize: 12, marginTop: 8}}>O mapa aparecerá aqui</div>
-            </Card>
-          )}
-          <div style={{marginTop: 10}}>
-            <a href={`https://www.google.com/maps/search/${encodeURIComponent(query+" "+city)}`} target="_blank" rel="noreferrer"
-              style={{color: T.accent, fontSize: 12, textDecoration: "none", display: "flex", alignItems: "center", gap: 4}}>
-              ↗ Abrir no Google Maps completo
-            </a>
-          </div>
-        </div>
-
-        {/* AI Results */}
-        <div>
-          <div style={{fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 10}}>🤖 Leads Sugeridos pela IA</div>
-          {loadingResults ? (
-            <Card style={{textAlign: "center", padding: 40}}>
-              <div style={{fontSize: 32, marginBottom: 10}}>🤖</div>
-              <div style={{color: T.sub}}>Buscando leads com IA...</div>
-            </Card>
-          ) : results.length > 0 ? (
-            <div style={{display: "flex", flexDirection: "column", gap: 10, maxHeight: 420, overflowY: "auto"}}>
-              {results.map((lead, i) => (
-                <Card key={i} style={{padding: 14}}>
-                  <div style={{display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10}}>
-                    <div style={{flex: 1}}>
-                      <div style={{fontWeight: 700, color: T.text, fontSize: 13, marginBottom: 4}}>{lead.name}</div>
-                      <div style={{display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4}}>
-                        {lead.segment && <span style={{background: T.accent+"22", color: T.accent, borderRadius: 5, padding: "1px 8px", fontSize: 11}}>{lead.segment}</span>}
-                        {lead.potential && <span style={{background: (potentialColor[lead.potential]||T.muted)+"22", color: potentialColor[lead.potential]||T.muted, borderRadius: 5, padding: "1px 8px", fontSize: 11, fontWeight: 700}}>Potencial: {lead.potential}</span>}
-                      </div>
-                      {lead.phone && <div style={{color: T.sub, fontSize: 12}}>📞 {lead.phone}</div>}
-                      {lead.city && <div style={{color: T.muted, fontSize: 11}}>📍 {lead.address || lead.city}</div>}
-                    </div>
-                    <button
-                      onClick={() => saveAsClient(lead)}
-                      disabled={saving === lead.name}
-                      style={{background: T.green+"22", border: `1px solid ${T.green}40`, color: T.green, borderRadius: 8, padding: "6px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, whiteSpace: "nowrap"}}
-                    >
-                      {saving === lead.name ? "Salvando..." : "💾 Salvar Lead"}
-                    </button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <Card style={{textAlign: "center", padding: 40, height: 380, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center"}}>
-              <div style={{fontSize: 40, marginBottom: 12}}>🎯</div>
-              <div style={{color: T.sub, fontSize: 13}}>Faça uma busca para ver leads sugeridos</div>
-              <div style={{color: T.muted, fontSize: 12, marginTop: 8}}>A IA vai sugerir empresas para prospectar</div>
-            </Card>
-          )}
-        </div>
+        )}
+        {mapUrl && (
+          <a href={mapUrl.replace("/embed","").replace("embedded=true","")} target="_blank" rel="noreferrer"
+            style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.sub, padding:"8px 14px", fontSize:12, textDecoration:"none", fontFamily:"inherit" }}>
+            ↗ Abrir no My Maps
+          </a>
+        )}
       </div>
 
-      {/* Tips */}
-      <Card style={{marginTop: 20, background: T.accent+"0A", border: `1px solid ${T.accent}20`}}>
-        <div style={{fontSize: 12, fontWeight: 700, color: T.accent, marginBottom: 8}}>💡 Como usar</div>
-        <div style={{color: T.muted, fontSize: 12, lineHeight: 1.8}}>
-          1. Digite o tipo de negócio que procura e a cidade/bairro<br/>
-          2. Clique em <strong style={{color:T.text}}>Pesquisar</strong> para ver no mapa e receber sugestões da IA<br/>
-          3. Clique em <strong style={{color:T.green}}>💾 Salvar Lead</strong> para adicionar o cliente à sua base<br/>
-          4. Use <strong style={{color:T.text}}>↗ Abrir no Google Maps</strong> para ver endereços e telefones reais
-        </div>
-        <div style={{marginTop:12,display:"flex",gap:8,flexWrap:"wrap"}}>
-          {[["Clínicas","São Paulo"],["Indústrias","Campinas"],["Escritórios","São Paulo"],["Escolas","Ribeirão Preto"],["Farmácias","Santos"]].map(([q,c])=>(
-            <button key={q} onClick={()=>{setQuery(q);setCity(c);}}
-              style={{background:"none",border:`1px solid ${T.border}`,borderRadius:6,color:T.sub,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
-              {q} em {c}
+      {/* URL Config (admin only) */}
+      {editingUrl && (
+        <div style={{ background:T.card, border:`1px solid ${T.accent}40`, borderRadius:12, padding:20, marginBottom:16 }}>
+          <div style={{ fontSize:14, fontWeight:700, color:T.text, marginBottom:8 }}>🗺 Configurar Google My Maps</div>
+          <div style={{ color:T.sub, fontSize:13, marginBottom:16, lineHeight:1.7 }}>
+            <strong style={{color:T.text}}>Como obter o link:</strong><br/>
+            1. Acesse <a href="https://mymaps.google.com" target="_blank" rel="noreferrer" style={{color:T.accent}}>mymaps.google.com</a><br/>
+            2. Abra ou crie seu mapa<br/>
+            3. Clique nos <strong style={{color:T.text}}>3 pontinhos ⋮</strong> ao lado do nome do mapa<br/>
+            4. Clique em <strong style={{color:T.text}}>"Incorporar no meu site"</strong><br/>
+            5. Copie a URL que começa com <code style={{background:T.surface,padding:"1px 6px",borderRadius:4,fontSize:11}}>https://www.google.com/maps/d/...</code>
+          </div>
+          <div style={{ display:"flex", gap:10 }}>
+            <input
+              style={{ flex:1, background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"10px 14px", fontSize:13, fontFamily:"inherit", outline:"none" }}
+              placeholder="https://www.google.com/maps/d/embed?mid=..."
+              value={inputUrl} onChange={e=>setInputUrl(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&saveUrl()}
+            />
+            <button onClick={saveUrl} style={{ background:T.accent, border:"none", borderRadius:8, color:"#fff", padding:"10px 20px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+              Salvar
             </button>
-          ))}
+          </div>
         </div>
-      </Card>
+      )}
+
+      {/* Map */}
+      {mapUrl ? (
+        <div style={{ borderRadius:14, overflow:"hidden", border:`1px solid ${T.border}`, background:T.surface }}>
+          <iframe
+            src={mapUrl}
+            width="100%"
+            height="620"
+            style={{ border:"none", display:"block" }}
+            allowFullScreen
+            loading="lazy"
+            title="Google My Maps"
+          />
+        </div>
+      ) : (
+        <div style={{ background:T.card, border:`2px dashed ${T.border}`, borderRadius:14, padding:64, textAlign:"center" }}>
+          <div style={{ fontSize:52, marginBottom:16 }}>🗺</div>
+          <div style={{ fontSize:16, fontWeight:700, color:T.text, marginBottom:8 }}>Google My Maps</div>
+          <div style={{ color:T.sub, fontSize:14, marginBottom:24 }}>
+            Configure o link do seu mapa personalizado para visualizar aqui dentro da plataforma
+          </div>
+          {user.role==="admin" ? (
+            <button onClick={()=>setEditingUrl(true)} style={{ background:T.accent, border:"none", borderRadius:8, color:"#fff", padding:"12px 28px", fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+              ⚙️ Configurar Mapa Agora
+            </button>
+          ) : (
+            <div style={{ color:T.muted, fontSize:13 }}>Solicite ao administrador para configurar o mapa.</div>
+          )}
+        </div>
+      )}
+
+      {/* Tips */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginTop:16 }}>
+        {[
+          { icon:"📍", title:"Adicione seus leads", desc:"No Google My Maps, adicione pinos com as informações dos prospects que encontrar" },
+          { icon:"💾", title:"Salve no sistema", desc:"Clique em '+ Salvar Cliente do Mapa' para adicionar um lead diretamente na sua base de clientes" },
+          { icon:"🔄", title:"Sincronize sua equipe", desc:"Compartilhe o mesmo My Maps com toda a equipe para todos verem os leads no mapa" },
+        ].map(tip => (
+          <div key={tip.title} style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:10, padding:16 }}>
+            <div style={{ fontSize:24, marginBottom:8 }}>{tip.icon}</div>
+            <div style={{ fontSize:13, fontWeight:700, color:T.text, marginBottom:4 }}>{tip.title}</div>
+            <div style={{ fontSize:12, color:T.muted, lineHeight:1.6 }}>{tip.desc}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Save Lead Modal */}
+      {saveModal && (
+        <div style={{ position:"fixed", inset:0, background:"#00000090", zIndex:2000, display:"flex", alignItems:"center", justifyContent:"center" }} onClick={()=>setSaveModal(false)}>
+          <div style={{ background:T.card, border:`1px solid ${T.border}`, borderRadius:16, padding:28, width:500, maxWidth:"95vw" }} onClick={e=>e.stopPropagation()}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }}>
+              <div style={{ fontSize:16, fontWeight:700, color:T.text }}>💾 Salvar Cliente do Mapa</div>
+              <button onClick={()=>setSaveModal(false)} style={{ background:"none", border:"none", color:T.muted, fontSize:22, cursor:"pointer" }}>×</button>
+            </div>
+            <div style={{ color:T.sub, fontSize:13, marginBottom:16 }}>
+              Preencha as informações do cliente que você encontrou no mapa:
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"0 16px" }}>
+              <div style={{ gridColumn:"1/-1" }}>
+                <div style={{ color:T.sub, fontSize:12, marginBottom:5, fontWeight:600 }}>Nome / Empresa <span style={{color:T.red}}>*</span></div>
+                <input style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"9px 12px", fontSize:13, width:"100%", fontFamily:"inherit", marginBottom:14, boxSizing:"border-box" }}
+                  placeholder="Nome da empresa ou pessoa" value={leadForm.name} onChange={e=>setLeadForm(f=>({...f,name:e.target.value}))} />
+              </div>
+              <div>
+                <div style={{ color:T.sub, fontSize:12, marginBottom:5, fontWeight:600 }}>Telefone</div>
+                <input style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"9px 12px", fontSize:13, width:"100%", fontFamily:"inherit", marginBottom:14, boxSizing:"border-box" }}
+                  placeholder="(11) 99999-9999" value={leadForm.phone} onChange={e=>setLeadForm(f=>({...f,phone:e.target.value}))} />
+              </div>
+              <div>
+                <div style={{ color:T.sub, fontSize:12, marginBottom:5, fontWeight:600 }}>Cidade</div>
+                <input style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"9px 12px", fontSize:13, width:"100%", fontFamily:"inherit", marginBottom:14, boxSizing:"border-box" }}
+                  placeholder="Cidade" value={leadForm.city} onChange={e=>setLeadForm(f=>({...f,city:e.target.value}))} />
+              </div>
+              <div>
+                <div style={{ color:T.sub, fontSize:12, marginBottom:5, fontWeight:600 }}>E-mail</div>
+                <input style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"9px 12px", fontSize:13, width:"100%", fontFamily:"inherit", marginBottom:14, boxSizing:"border-box" }}
+                  placeholder="email@empresa.com" value={leadForm.email} onChange={e=>setLeadForm(f=>({...f,email:e.target.value}))} />
+              </div>
+              <div>
+                <div style={{ color:T.sub, fontSize:12, marginBottom:5, fontWeight:600 }}>Segmento</div>
+                <select style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"9px 12px", fontSize:13, width:"100%", fontFamily:"inherit", marginBottom:14 }}
+                  value={leadForm.segment} onChange={e=>setLeadForm(f=>({...f,segment:e.target.value}))}>
+                  <option value="">Selecione...</option>
+                  {segments.map(s=><option key={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={{ color:T.sub, fontSize:12, marginBottom:5, fontWeight:600 }}>Origem</div>
+                <select style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.text, padding:"9px 12px", fontSize:13, width:"100%", fontFamily:"inherit", marginBottom:14 }}
+                  value={leadForm.origin} onChange={e=>setLeadForm(f=>({...f,origin:e.target.value}))}>
+                  <option value="Pesquisa de Leads">Pesquisa de Leads</option>
+                  {origins.map(o=><option key={o}>{o}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:10, justifyContent:"flex-end", marginTop:8 }}>
+              <button onClick={()=>setSaveModal(false)} style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:8, color:T.sub, padding:"9px 18px", fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>Cancelar</button>
+              <button onClick={saveLead} style={{ background:T.green, border:"none", borderRadius:8, color:"#fff", padding:"9px 20px", fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>💾 Salvar como Cliente</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
