@@ -32,7 +32,7 @@ function ListsProvider({ children }){
   return <ListsContext.Provider value={{segments,origins,reload}}>{children}</ListsContext.Provider>;
 }
 function getSegments(){return["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"];}
-function getOrigins(){return["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro"];}
+function getOrigins(){return["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro","Cliente da Base"];}
 
 const STATUS_OPTIONS=["Lead","Em contato","Sem contato","Whats","Caixa Postal","Telefone não existe"];
 const STATUS_COLORS={"Lead":T.accent,"Em contato":T.green,"Sem contato":T.muted,"Whats":T.purple,"Caixa Postal":T.yellow,"Telefone não existe":T.red};
@@ -43,6 +43,20 @@ const WHATS_TYPES=["Enviado","Recebido"];
 const MEETING_STATUS=["Agendada","Realizada","Cancelada","Reagendada"];
 
 const today=()=>new Date().toISOString().slice(0,10);
+function maskCNPJ(v){
+  const n=v.replace(/[^\d]/g,"").slice(0,14);
+  if(n.length<=11){
+    if(n.length<=3) return n;
+    if(n.length<=6) return n.slice(0,3)+"."+n.slice(3);
+    if(n.length<=9) return n.slice(0,3)+"."+n.slice(3,6)+"."+n.slice(6);
+    return n.slice(0,3)+"."+n.slice(3,6)+"."+n.slice(6,9)+"-"+n.slice(9);
+  }
+  if(n.length<=2) return n;
+  if(n.length<=5) return n.slice(0,2)+"."+n.slice(2);
+  if(n.length<=8) return n.slice(0,2)+"."+n.slice(2,5)+"."+n.slice(5);
+  if(n.length<=12) return n.slice(0,2)+"."+n.slice(2,5)+"."+n.slice(5,8)+"/"+n.slice(8);
+  return n.slice(0,2)+"."+n.slice(2,5)+"."+n.slice(5,8)+"/"+n.slice(8,12)+"-"+n.slice(12);
+}
 const nowTime=()=>new Date().toTimeString().slice(0,5);
 function weekRange(){const n=new Date();const s=new Date(n);s.setDate(n.getDate()-n.getDay());const e=new Date(n);e.setDate(n.getDate()+(6-n.getDay()));return[s.toISOString().slice(0,10),e.toISOString().slice(0,10)];}
 
@@ -208,10 +222,13 @@ function Dashboard({user,profiles,onNav}){
     load();
   },[]);
   // ── COMPUTED VALUES (after hooks) ──
+  // Both vendedor and admin use same logic - vendedor just sees filtered data
   const allCalls=user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls;
   const myCalls=dateMode==="specific"
     ?allCalls.filter(c=>c.date===specificDate)
     :allCalls.filter(c=>c.date?.startsWith(dashMonth));
+  // vendedor sees own clients, admin sees all
+  const allCallsUnfiltered=calls; // for team goals
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
   const myFU=user.role==="vendedor"?followups.filter(f=>f.user_id===user.id):followups;
   const pendFU=myFU.filter(f=>f.status==="Pendente"&&f.date<=today());
@@ -247,13 +264,16 @@ function Dashboard({user,profiles,onNav}){
   const relevantGoals = user.role==="vendedor"
     ? goals.filter(g=>g.user_id===user.id&&g.period===period)
     : sellers.map(s=>goals.find(g=>g.user_id===s.id&&g.period===period)).filter(Boolean);
+  // For vendedor: filter calls only by own; for admin: team total  
+  const filterCallsForGoal = user.role==="vendedor"
+    ? (goalFilter==="day"?myCalls.filter(c=>c.date===today()):goalFilter==="week"?myCalls.filter(c=>{const[ws2,we2]=weekRange();return c.date>=ws2&&c.date<=we2;}):myCalls)
+    : (goalFilter==="day"?allCalls.filter(c=>c.date===today()):goalFilter==="week"?allCalls.filter(c=>{const[ws2,we2]=weekRange();return c.date>=ws2&&c.date<=we2;}):allCalls.filter(c=>c.date?.startsWith(dashMonth)));
   const totalMeta={
     prosp:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.prosp_day:goalFilter==="week"?g.prosp_week:g.prosp_month),0),
     base:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.base_day:goalFilter==="week"?g.base_week:g.base_month),0),
     get general(){ return this.prosp + this.base; }
   };
-  const filterCalls=goalFilter==="day"?myCalls.filter(c=>c.date===today()):goalFilter==="week"?myCalls.filter(c=>c.date>=ws&&c.date<=we):myCalls;
-  const realGeneral=filterCalls.length,realProsp=Math.round(realGeneral*.4),realBase=Math.round(realGeneral*.6);
+  const realGeneral=filterCallsForGoal.length,realProsp=Math.round(realGeneral*.4),realBase=Math.round(realGeneral*.6);
   const FB=[["day","Dia"],["week","Semana"],["month","Mês"]];
   return(
     <div>
@@ -316,7 +336,12 @@ function Dashboard({user,profiles,onNav}){
         <Card>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
             <div style={{fontSize:13,fontWeight:700,color:T.sub}}>📈 Volumetria de Ligações</div>
-            <div style={{display:"flex",gap:6}}>{FB.map(([k,v])=><Btn key={k} size="sm" variant={volFilter===k?"primary":"ghost"} onClick={()=>setVolFilter(k)}>{v}</Btn>)}</div>
+            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+              {dateMode==="month"
+                ?<input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"5px 10px",fontSize:11,fontFamily:"inherit"}} value={dashMonth} onChange={e=>setDashMonth(e.target.value)}/>
+                :<input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"5px 10px",fontSize:11,fontFamily:"inherit"}} value={specificDate} onChange={e=>setSpecificDate(e.target.value)}/>}
+              {FB.map(([k,v])=><Btn key={k} size="sm" variant={volFilter===k?"primary":"ghost"} onClick={()=>setVolFilter(k)}>{v}</Btn>)}
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={volData} margin={{top:20,right:10,left:-20,bottom:0}}>
@@ -711,10 +736,10 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
       <Card style={{padding:0,overflow:"hidden"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
           <thead><tr style={{background:T.surface}}>
-            {["Nome","Telefone","Dias Cadastro","Último Contato","Segmento","Status","Acionamentos","Responsável",""].map(h=><th key={h} style={{padding:"10px 12px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:11,borderBottom:`1px solid ${T.border}`}}>{h}</th>)}
+            {["Nome","CNPJ/CPF","Telefone","Origem","Segmento","Status","Dias Cadastro","Último Contato","Acionamentos","Resp.",""].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:10,borderBottom:`1px solid ${T.border}`}}>{h}</th>)}
           </tr></thead>
           <tbody>
-            {visible.length===0&&<tr><td colSpan={9} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhum cliente encontrado.</td></tr>}
+            {visible.length===0&&<tr><td colSpan={11} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhum cliente encontrado.</td></tr>}
             {visible.map(c=>(
               <tr key={c.id} style={{borderBottom:`1px solid ${T.border}15`}}>
                 <td style={{padding:"10px 12px"}}>
@@ -749,7 +774,7 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
       <Modal open={modal} title={edit?"Editar Cliente":"Novo Cliente"} onClose={()=>setModal(false)} width={580}>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
           <Input label="Nome / Razão Social" value={form.name} onChange={v=>setForm(f=>({...f,name:v}))} required/>
-          <Input label="CNPJ / CPF" value={form.cnpj} onChange={v=>setForm(f=>({...f,cnpj:v}))}/>
+          <div style={{marginBottom:14}}><div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>CNPJ / CPF</div><input style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,width:"100%",fontFamily:"inherit",outline:"none",boxSizing:"border-box"}} placeholder="00.000.000/0001-00 ou 000.000.000-00" value={form.cnpj} onChange={e=>setForm(f=>({...f,cnpj:maskCNPJ(e.target.value)}))}/></div>
           <Input label="Telefone" value={form.phone} onChange={v=>setForm(f=>({...f,phone:v}))} required/>
           <Input label="WhatsApp" value={form.whatsapp} onChange={v=>setForm(f=>({...f,whatsapp:v}))}/>
           <Input label="E-mail" value={form.email} onChange={v=>setForm(f=>({...f,email:v}))} type="email"/>
@@ -793,7 +818,13 @@ function Calls({user,profiles,preClient,onSaved}){
   async function save(){
     if(!form.client_id)return alert("Selecione um cliente.");
     const duration=`${form.duration_min}min ${form.duration_sec}s`;
-    await supabase.from("calls").insert({...form,duration,user_id:user.id,client_id:form.client_id});
+    const {duration_min:_a, duration_sec:_b, ...formRest} = form;
+    const {error:callErr} = await supabase.from("calls").insert({
+      client_id: form.client_id, user_id: user.id,
+      date: form.date, time: form.time, type: form.type,
+      obs: form.obs, result: form.result, duration,
+    });
+    if(callErr){console.error(callErr);alert("Erro ao registrar: "+callErr.message);return;}
     if(fuForm.active && fuForm.date){
       await supabase.from("followups").insert({client_id:form.client_id,user_id:user.id,date:fuForm.date,type:fuForm.type,description:fuForm.description,status:"Pendente"});
     }
@@ -899,8 +930,26 @@ function Whatsapp({user,preClient,onSaved}){
   const myWhats=(user.role==="vendedor"?whats.filter(w=>w.user_id===user.id):whats).filter(w=>(!fType||w.type===fType)&&(!fStatus||w.status===fStatus)&&(!fDate||w.date===fDate)&&(!fMonth||w.date?.startsWith(fMonth)));
   async function save(){
     if(!form.client_id)return alert("Selecione um cliente.");
-    const {error:wErr}=await supabase.from("whatsapp_logs").insert({...form,user_id:user.id});
-    if(wErr){alert("Erro ao salvar WhatsApp: "+wErr.message);return;}await load();setModal(false);}
+    const {error:wErr}=await supabase.from("whatsapp_logs").insert({
+      client_id: form.client_id,
+      user_id: user.id,
+      date: form.date,
+      time: form.time,
+      type: form.type,
+      content: form.content,
+      status: form.status,
+    });
+    if(wErr){console.error(wErr);alert("Erro ao salvar WhatsApp: "+wErr.message);return;}
+    if(fuFormW.active && fuFormW.date){
+      await supabase.from("followups").insert({client_id:form.client_id,user_id:user.id,date:fuFormW.date,type:fuFormW.type,description:fuFormW.description,status:"Pendente"});
+    }
+    const savedClient=myClients.find(c=>c.id===form.client_id);
+    await load();
+    setModal(false);
+    setFuFormW({active:false,date:"",type:"WhatsApp",description:""});
+    if(onSaved && savedClient) onSaved(savedClient, schedMeetingW);
+    setSchedMeetingW(false);
+  }
   function openWhatsApp(clientId){const c=clients.find(c=>c.id===clientId);if(!c?.whatsapp)return alert("Cliente sem WhatsApp cadastrado.");const num=c.whatsapp.replace(/\D/g,"");window.open(`https://wa.me/55${num}`,"_blank");}
   if(loading)return<Spinner/>;
   return(
@@ -988,9 +1037,22 @@ function Followups({user,preClient}){
   // Conclude flow
   const[concludeModal,setConcludeModal]=useState(false);
   const[concludeFU,setConcludeFU]=useState(null);
-  const[concludeType,setConcludeType]=useState(""); // "Ligação" or "WhatsApp"
+  const[concludeType,setConcludeType]=useState("");
   const[regModal,setRegModal]=useState(false);
   const[regForm,setRegForm]=useState({type:"Atendida",result:"Interesse",obs:"",content:"",status:"Enviado"});
+  const[fuDocs,setFuDocs]=useState(()=>{try{const s=localStorage.getItem("krcf_fu_docs");return s?JSON.parse(s):{};}catch{return{};}});
+  const[fuDocFile,setFuDocFile]=useState(null);
+  function saveFuDocs(d){setFuDocs(d);localStorage.setItem("krcf_fu_docs",JSON.stringify(d));}
+  function attachFuDoc(fuId){
+    if(!fuDocFile)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const doc={name:fuDocFile.name,url:ev.target.result,date:today(),size:Math.round(fuDocFile.size/1024)+"KB"};
+      const updated={...fuDocs,[fuId]:[...(fuDocs[fuId]||[]),doc]};
+      saveFuDocs(updated);setFuDocFile(null);
+    };
+    reader.readAsDataURL(fuDocFile);
+  }
   const load=useCallback(async()=>{
     const[f,c]=await Promise.all([supabase.from("followups").select("*").order("date"),supabase.from("clients").select("id,name,responsible")]);
     setFus(f.data||[]);setClients(c.data||[]);setLoading(false);
@@ -1086,9 +1148,14 @@ function Followups({user,preClient}){
         </div>
         <Input label="Título" value={form.title||""} onChange={v=>setForm(f=>({...f,title:v}))} placeholder="Título do follow-up (opcional)"/>
         <Input label="Descrição" value={form.description} onChange={v=>setForm(f=>({...f,description:v}))}/>
+        <div style={{marginBottom:14}}>
+          <div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>📎 Anexar Documento (opcional)</div>
+          <input type="file" onChange={e=>setFuDocFile(e.target.files[0])} style={{color:T.sub,fontSize:12,display:"block"}}/>
+          {fuDocFile&&<div style={{color:T.muted,fontSize:11,marginTop:4}}>Selecionado: {fuDocFile.name}</div>}
+        </div>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
-          <Btn onClick={save}>Salvar</Btn>
+          <Btn onClick={async()=>{await save();if(fuDocFile)setTimeout(()=>{const last=fus[fus.length-1];if(last)attachFuDoc(last.id);},500);}}>Salvar</Btn>
         </div>
       </Modal>
 
@@ -1171,6 +1238,10 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
   const[cancelModal,setCancelModal]=useState(false);
   const[cancelMeetingId,setCancelMeetingId]=useState(null);
   const[cancelReason,setCancelReason]=useState("");
+  const[reschedModal,setReschedModal]=useState(false);
+  const[reschedId,setReschedId]=useState(null);
+  const[reschedDate,setReschedDate]=useState("");
+  const[reschedTime,setReschedTime]=useState("09:00");
   const[docs,setDocs]=useState({}); // {meetingId: [{name,url,date}]}
   const[addDocId,setAddDocId]=useState(null); // which meeting to add doc to
   const[docFile,setDocFile]=useState(null);
@@ -1288,6 +1359,37 @@ function Meetings({user,profiles,preClient,onMarkRealizada}){
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
+      {/* Reschedule Modal */}
+      {reschedModal&&(
+        <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setReschedModal(false)}>
+          <div style={{background:T.card,border:`1px solid ${T.yellow}`,borderRadius:14,padding:28,width:380,maxWidth:"95vw"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:4}}>↺ Reagendar Reunião</div>
+            <div style={{color:T.sub,fontSize:13,marginBottom:16}}>Selecione a nova data e horário:</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px",marginBottom:20}}>
+              <div>
+                <div style={{color:T.sub,fontSize:12,marginBottom:4,fontWeight:600}}>Nova Data *</div>
+                <input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"9px 12px",fontSize:13,width:"100%",fontFamily:"inherit"}}
+                  value={reschedDate} onChange={e=>setReschedDate(e.target.value)}/>
+              </div>
+              <div>
+                <div style={{color:T.sub,fontSize:12,marginBottom:4,fontWeight:600}}>Horário</div>
+                <input type="time" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"9px 12px",fontSize:13,width:"100%",fontFamily:"inherit"}}
+                  value={reschedTime} onChange={e=>setReschedTime(e.target.value)}/>
+              </div>
+            </div>
+            <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+              <button onClick={()=>setReschedModal(false)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:8,color:T.sub,padding:"9px 18px",fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+              <button onClick={async()=>{
+                if(!reschedDate){alert("Selecione a nova data.");return;}
+                await supabase.from("meetings").update({date:reschedDate,time:reschedTime,status:"Reagendada"}).eq("id",reschedId);
+                setReschedModal(false);setReschedId(null);await load();
+              }} style={{background:T.yellow,border:"none",borderRadius:8,color:"#000",padding:"9px 20px",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>
+                Confirmar Reagendamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Cancel Meeting Modal */}
       {cancelModal&&(
         <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setCancelModal(false)}>
@@ -2094,15 +2196,15 @@ function Reports({ user, profiles }) {
   const [selectedSeller, setSelectedSeller] = useState(isVendedor ? user.id : "");
   const [sending, setSending] = useState(false);
   const [sentMsg, setSentMsg] = useState("");
+  const [reportMonth, setReportMonth] = useState(new Date().toISOString().slice(0,7));
   const sellers = profiles.filter(p => p.role === "vendedor");
 
   async function generateReport() {
     setLoading(true); setReport(""); setSentMsg("");
     try {
-      // Fetch data
       const [{ data: meetings }, { data: calls }, { data: clients }] = await Promise.all([
-        supabase.from("meetings").select("*"),
-        supabase.from("calls").select("*"),
+        supabase.from("meetings").select("*").gte("date",reportMonth+"-01").lte("date",reportMonth+"-31"),
+        supabase.from("calls").select("*").gte("date",reportMonth+"-01").lte("date",reportMonth+"-31"),
         supabase.from("clients").select("*"),
       ]);
 
@@ -2206,6 +2308,10 @@ Seja encorajador mas direto. Use dados específicos.`;
               📊 Relatório de performance: <strong style={{color:T.text}}>{user.name}</strong>
             </div>
           )}
+          <div>
+            <div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Mês do Relatório</div>
+            <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 14px",fontSize:13,fontFamily:"inherit"}} value={reportMonth} onChange={e=>setReportMonth(e.target.value)}/>
+          </div>
           <button onClick={generateReport} disabled={loading} style={{ background: T.accent, border: "none", borderRadius: 8, color: "#fff", padding: "9px 20px", fontSize: 13, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1, fontFamily: "inherit" }}>
             {loading ? "🤖 Gerando..." : "🤖 Gerar com IA"}
           </button>
