@@ -3,11 +3,17 @@ import { createClient } from "@supabase/supabase-js";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
 
 // ============================================================
-//  ⚙️  CONFIGURAÇÃO SUPABASE
+//  ⚙️  CONFIGURAÇÃO — Substitua com suas credenciais
 // ============================================================
+
+// 1. SUPABASE — encontre em supabase.com > Settings > API
 const SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// 2. ANTHROPIC (IA) — obtenha em console.anthropic.com > API Keys
+// Cole sua chave abaixo entre as aspas:
+const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
 
 // ─── THEME ───────────────────────────────────────────────────
 const T = {
@@ -25,8 +31,13 @@ function ListsProvider({ children }){
   const[origins,setOrigins]=useState([]);
   const reload=useCallback(async()=>{
     const[s,o]=await Promise.all([supabase.from("segments").select("*").order("name"),supabase.from("origins").select("*").order("name")]);
-    setSegments((s.data||[]).map(x=>x.name));
-    setOrigins((o.data||[]).map(x=>x.name));
+    const dbSegs=(s.data||[]).map(x=>x.name);
+    const dbOrigs=(o.data||[]).map(x=>x.name);
+    // Always include "Cliente da Base" in origins
+    const defaultOrigs=["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro","Cliente da Base","Pesquisa de Leads"];
+    const mergedOrigs=[...new Set([...dbOrigs,...defaultOrigs])];
+    setSegments(dbSegs.length>0?dbSegs:["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"]);
+    setOrigins(mergedOrigs);
   },[]);
   useEffect(()=>{reload();},[reload]);
   return <ListsContext.Provider value={{segments,origins,reload}}>{children}</ListsContext.Provider>;
@@ -636,6 +647,8 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
   const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);const[edit,setEdit]=useState(null);
   const[historyClient,setHistoryClient]=useState(null);
+  const[clientDocFile,setClientDocFile]=useState(null);
+  const[clientDocs,setClientDocs]=useState(()=>{try{const s=localStorage.getItem("krcf_client_docs");return s?JSON.parse(s):{};}catch{return{};}});
   const[allCalls,setAllCalls]=useState([]);const[allWhats,setAllWhats]=useState([]);const[allFUs,setAllFUs]=useState([]);const[allMeetings,setAllMeetings]=useState([]);
   const[search,setSearch]=useState("");const[fStatus,setFStatus]=useState("");const[fSeg,setFSeg]=useState("");const[fOrigin,setFOrigin]=useState("");const[fResp,setFResp]=useState("");
   const emptyForm={name:"",cnpj:"",phone:"",whatsapp:"",email:"",city:"",state:"",segment:"",origin:"",responsible:user.role==="vendedor"?user.id:"",status:"Lead"};
@@ -742,16 +755,24 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
             {visible.length===0&&<tr><td colSpan={11} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhum cliente encontrado.</td></tr>}
             {visible.map(c=>(
               <tr key={c.id} style={{borderBottom:`1px solid ${T.border}15`}}>
-                <td style={{padding:"10px 12px"}}>
-                  <button onClick={()=>setHistoryClient(c)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:13,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit",textAlign:"left"}}>{c.name}</button>
+                {/* Nome */}
+                <td style={{padding:"9px 10px"}}>
+                  <button onClick={()=>setHistoryClient(c)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit",textAlign:"left"}}>{c.name}</button>
                 </td>
-                <td style={{padding:"10px 12px",color:T.sub}}>{c.phone}</td>
-                <td style={{padding:"10px 12px",textAlign:"center"}}>
-                  <span style={{color:T.muted,fontSize:12}}>{getDaysSince(c.created_at)}d</span>
-                </td>
-                <td style={{padding:"10px 12px",textAlign:"center"}}>{(()=>{const last=getLastActivity(c.id);const days=getDaysSince(last);return<span style={{color:days>30?T.red:days>7?T.yellow:T.green,fontWeight:700,fontSize:12}}>{last?days+"d":"—"}</span>;})()}</td>
-                <td style={{padding:"10px 12px"}}><Badge color={T.accent}>{c.segment||"—"}</Badge></td>
-                <td style={{padding:"10px 12px"}}><Badge color={STATUS_COLORS[c.status]||T.muted}>{c.status}</Badge></td>
+                {/* CNPJ/CPF */}
+                <td style={{padding:"9px 10px",color:T.muted,fontSize:11}}>{c.cnpj||"—"}</td>
+                {/* Telefone */}
+                <td style={{padding:"9px 10px",color:T.sub,fontSize:11}}>{c.phone}</td>
+                {/* Origem */}
+                <td style={{padding:"9px 10px"}}><Badge color={T.purple}>{c.origin||"—"}</Badge></td>
+                {/* Segmento */}
+                <td style={{padding:"9px 10px"}}><Badge color={T.accent}>{c.segment||"—"}</Badge></td>
+                {/* Status */}
+                <td style={{padding:"9px 10px"}}><Badge color={STATUS_COLORS[c.status]||T.muted}>{c.status}</Badge></td>
+                {/* Dias Cadastro */}
+                <td style={{padding:"9px 10px",textAlign:"center"}}><span style={{color:T.muted,fontSize:11}}>{getDaysSince(c.created_at)}d</span></td>
+                {/* Último Contato */}
+                <td style={{padding:"9px 10px",textAlign:"center"}}>{(()=>{const last=getLastActivity(c.id);const days=getDaysSince(last);return<span style={{color:days>30?T.red:days>7?T.yellow:T.green,fontWeight:700,fontSize:11}}>{last?days+"d":"—"}</span>;})()}</td>
                 <td style={{padding:"10px 12px"}}>
                   <div style={{display:"flex",gap:4}}>
                     <Btn size="sm" variant="ghost" title="Registrar Ligação" onClick={()=>onQuickCall(c)} style={{padding:"4px 8px",fontSize:13}}>📞</Btn>
@@ -788,8 +809,13 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
               <option value="">Selecione...</option>{profiles.filter(p=>p.role==="vendedor").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
             </select></div>}
         </div>
+        <div style={{marginBottom:14}}>
+          <div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>📎 Anexar Documento (opcional)</div>
+          <input type="file" id="cl_doc_file" onChange={e=>setClientDocFile(e.target.files[0])} style={{color:T.sub,fontSize:12,display:"block"}}/>
+          {clientDocFile&&<div style={{color:T.muted,fontSize:11,marginTop:4}}>✅ {clientDocFile.name}</div>}
+        </div>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end",marginTop:8}}>
-          <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
+          <Btn variant="ghost" onClick={()=>{setModal(false);setClientDocFile(null);}}>Cancelar</Btn>
           <Btn onClick={save}>Salvar</Btn>
         </div>
       </Modal>
@@ -1822,9 +1848,6 @@ const PROPOSAL_STATUS = ["Em negociação","Proposta enviada","Proposta fechada"
 const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 // ─── AI CONFIG ───────────────────────────────────────────────
-// Para usar a IA, adicione sua API key da Anthropic abaixo:
-const ANTHROPIC_KEY = ""; // Cole aqui: sk-ant-...
-
 async function callAI(prompt, maxTokens = 1000) {
   if (!ANTHROPIC_KEY) {
     throw new Error("Configure a ANTHROPIC_KEY no topo do arquivo (linha com sk-ant-)");
