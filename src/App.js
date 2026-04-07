@@ -10,10 +10,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
+const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
 // 2. ANTHROPIC (IA) — obtenha em console.anthropic.com > API Keys
 // Cole sua chave abaixo entre as aspas:
-const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
+ "sk-ant-api03-tV5...vwAA"
 
 // ─── THEME ───────────────────────────────────────────────────
 const T = {
@@ -45,12 +45,17 @@ function ListsProvider({ children }){
 function getSegments(){return["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"];}
 function getOrigins(){return["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro","Cliente da Base"];}
 
-const DEFAULT_STATUSES=["Lead","Em contato","Sem contato","Whats","Caixa Postal","Telefone não existe"];
-function getStatuses(){try{const s=localStorage.getItem("krcf_statuses");return s?JSON.parse(s):DEFAULT_STATUSES;}catch{return DEFAULT_STATUSES;}}
-const STATUS_OPTIONS=getStatuses();
-const STATUS_COLOR_MAP={"Lead":T.accent,"Em contato":T.green,"Sem contato":T.muted,"Whats":T.purple,"Caixa Postal":T.yellow,"Telefone não existe":T.red};
-function getStatusColor(s){return STATUS_COLOR_MAP[s]||T.accent;}
-const STATUS_COLORS=Object.fromEntries(getStatuses().map(s=>[s,getStatusColor(s)]));
+// Status system - supports objects {name,color} stored in localStorage
+function getStatusList(){
+  try{
+    const s=localStorage.getItem("krcf_statuses_v2");
+    if(s) return JSON.parse(s);
+    return [{name:"Lead",color:"#3B82F6"},{name:"Em contato",color:"#10B981"},{name:"Cliente da Base",color:"#3B82F6"},{name:"Prospecção",color:"#F59E0B"},{name:"Sem contato",color:"#64748B"},{name:"Whats",color:"#8B5CF6"},{name:"Caixa Postal",color:"#F59E0B"},{name:"Telefone não existe",color:"#EF4444"}];
+  }catch{return [{name:"Lead",color:"#3B82F6"},{name:"Em contato",color:"#10B981"},{name:"Sem contato",color:"#64748B"}];}
+}
+const STATUS_OPTIONS=getStatusList().map(s=>s.name);
+function getStatusColor(name){const f=getStatusList().find(s=>s.name===name);return f?.color||T.accent;}
+const STATUS_COLORS=Object.fromEntries(getStatusList().map(s=>[s.name,s.color]));
 const CALL_TYPES=["Atendida","Não atendida","Caixa Postal"];
 const CALL_RESULTS=["Interesse","Sem interesse","Retornar"];
 const FOLLOWUP_TYPES=["Ligação","WhatsApp","Reunião"];
@@ -830,227 +835,150 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
   );
 }
 
-// ─── CALLS ───────────────────────────────────────────────────
-function Calls({user,profiles,preClient,onSaved}){
-  const {open:openView, modal:viewModal} = useClientView();
-  const[calls,setCalls]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
-  const[modal,setModal]=useState(false);const[schedMeeting,setSchedMeeting]=useState(false);
-  const emptyForm={client_id:"",date:today(),time:nowTime(),type:"Atendida",duration_min:"0",duration_sec:"0",obs:"",result:"Retornar"};
-  const[form,setForm]=useState(emptyForm);
-  const[fuForm,setFuForm]=useState({active:false,date:"",type:"Ligação",description:""});
-  const[fType,setFType]=useState("");const[fResult,setFResult]=useState("");const[fDate,setFDate]=useState("");const[fMonth,setFMonth]=useState("");
+// ─── ACIONAMENTOS ────────────────────────────────────────────
+function Acionamentos({user,profiles,preClient,preCanal}){
+  const {open:openView,modal:viewModal}=useClientView();
+  const [acs,setAcs]=useState([]);
+  const [clients,setClients]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [modal,setModal]=useState(false);
+  const channels=getChannels();
+  const ch=(code)=>channels.find(c=>c.code===code)||{icon:"📋",color:T.muted,name:code||"Outro"};
+  const emptyForm={client_id:"",canal:preCanal||channels[0]?.code||"LIGACAO",date:today(),time:nowTime(),type:"Atendida",result:"Retornar",obs:"",duration_min:"0",duration_sec:"0",status_val:"Enviado",fu_active:false,fu_date:"",fu_type:"Ligação",fu_desc:"",sched_meeting:false};
+  const [form,setForm]=useState(emptyForm);
+  const [fCanal,setFCanal]=useState("");
+  const [fDate,setFDate]=useState("");
+  const [fMonth,setFMonth]=useState("");
   const load=useCallback(async()=>{
-    const[c,cl]=await Promise.all([supabase.from("calls").select("*").order("created_at",{ascending:false}),supabase.from("clients").select("id,name,responsible,whatsapp")]);
-    setCalls(c.data||[]);setClients(cl.data||[]);setLoading(false);
+    const [{data:a},{data:cl}]=await Promise.all([
+      supabase.from("acionamentos").select("*").order("created_at",{ascending:false}),
+      supabase.from("clients").select("id,name,responsible,whatsapp"),
+    ]);
+    setAcs(a||[]);setClients(cl||[]);setLoading(false);
   },[]);
   useEffect(()=>{load();},[load]);
-  useEffect(()=>{if(preClient){setForm(f=>({...f,client_id:preClient.id}));setModal(true);}}, [preClient]);
+  useEffect(()=>{if(preClient){setForm(f=>({...f,client_id:preClient.id,canal:preCanal||f.canal}));setModal(true);}}, [preClient,preCanal]);
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
-  const myCalls=(user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls).filter(c=>(!fType||c.type===fType)&&(!fResult||c.result===fResult)&&(!fDate||c.date===fDate)&&(!fMonth||c.date?.startsWith(fMonth)));
+  const myAcs=(user.role==="vendedor"?acs.filter(a=>a.user_id===user.id):acs)
+    .filter(a=>(!fCanal||a.canal===fCanal)&&(!fDate||a.date===fDate)&&(!fMonth||a.date?.startsWith(fMonth)));
+  const isLig=form.canal==="LIGACAO";
   async function save(){
     if(!form.client_id)return alert("Selecione um cliente.");
     const duration=`${form.duration_min}min ${form.duration_sec}s`;
-    const {duration_min:_a, duration_sec:_b, ...formRest} = form;
-    const {error:callErr} = await supabase.from("calls").insert({
-      client_id: form.client_id, user_id: user.id,
-      date: form.date, time: form.time, type: form.type,
-      obs: form.obs, result: form.result, duration,
+    const {error}=await supabase.from("acionamentos").insert({
+      client_id:form.client_id,user_id:user.id,canal:form.canal,
+      date:form.date,time:form.time,type:form.type,
+      result:isLig?(form.result||null):null,
+      obs:form.obs||null,duration,
+      status_val:!isLig?(form.status_val||null):null,
     });
-    if(callErr){console.error(callErr);alert("Erro ao registrar: "+callErr.message);return;}
-    if(fuForm.active && fuForm.date){
-      await supabase.from("followups").insert({client_id:form.client_id,user_id:user.id,date:fuForm.date,type:fuForm.type,description:fuForm.description,status:"Pendente"});
+    if(error){console.error("[Acionamentos]",error);alert("Erro: "+error.message);return;}
+    if(form.fu_active&&form.fu_date){
+      await supabase.from("followups").insert({client_id:form.client_id,user_id:user.id,date:form.fu_date,type:form.fu_type,description:form.fu_desc,status:"Pendente"});
     }
-    const savedClient = myClients.find(c=>c.id===form.client_id);
-    await load();setModal(false);setFuForm({active:false,date:"",type:"Ligação",description:""});
-    if(onSaved && savedClient) onSaved(savedClient, schedMeeting);
-    setSchedMeeting(false);
+    await load();setModal(false);setForm(emptyForm);
   }
+  function openWA(clientId){const c=clients.find(c=>c.id===clientId);if(!c?.whatsapp)return alert("Sem WhatsApp.");window.open(`https://wa.me/55${c.whatsapp.replace(/\D/g,"")}`);}
   if(loading)return<Spinner/>;
   return(
     <div>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16,gap:8,flexWrap:"wrap",alignItems:"center"}}>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fMonth} onChange={e=>setFMonth(e.target.value)}/>
-          <input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fDate} onChange={e=>setFDate(e.target.value)}/>
+      <div style={{display:"flex",justifyContent:"space-between",marginBottom:14,gap:8,flexWrap:"wrap",alignItems:"center"}}>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+          <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fCanal} onChange={e=>setFCanal(e.target.value)}>
+            <option value="">Todos canais</option>
+            {channels.map(c=><option key={c.code} value={c.code}>{c.icon} {c.name}</option>)}
+          </select>
+          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12,fontFamily:"inherit"}} value={fMonth} onChange={e=>setFMonth(e.target.value)}/>
+          <input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12,fontFamily:"inherit"}} value={fDate} onChange={e=>setFDate(e.target.value)}/>
         </div>
-        <Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Registrar Ligação</Btn>
+        <Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Registrar Acionamento</Btn>
       </div>
-      <Card style={{padding:0,overflow:"hidden"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead><tr>
-            <ThFilter label="Cliente" value="" onChange={()=>{}}/>
-            <ThFilter label="Data" value={fDate} onChange={setFDate}/>
-            <ThFilter label="Hora" value="" onChange={()=>{}}/>
-            <ThFilter label="Tipo" value={fType} onChange={setFType} options={CALL_TYPES}/>
-            <ThFilter label="Duração" value="" onChange={()=>{}}/>
-            <ThFilter label="Resultado" value={fResult} onChange={setFResult} options={CALL_RESULTS}/>
-            <ThFilter label="Obs" value="" onChange={()=>{}}/>
-          </tr></thead>
-          <tbody>
-            {myCalls.length===0&&<tr><td colSpan={7} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhuma ligação registrada.</td></tr>}
-            {myCalls.map(c=>(
-              <tr key={c.id} style={{borderBottom:`1px solid ${T.border}15`}}>
-                <td style={{padding:"10px 12px"}}>{(()=>{const cl=clients.find(cl=>cl.id===c.client_id);return cl?<button onClick={()=>openView(cl.id,cl.name)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit"}}>{cl.name}</button>:<span style={{color:T.muted}}>—</span>;})()}</td>
-                <td style={{padding:"10px 12px",color:T.sub}}>{c.date}</td>
-                <td style={{padding:"10px 12px",color:T.sub}}>{c.time}</td>
-                <td style={{padding:"10px 12px"}}><Badge color={c.type==="Atendida"?T.green:c.type==="Não atendida"?T.red:T.yellow}>{c.type}</Badge></td>
-                <td style={{padding:"10px 12px",color:T.sub}}>{c.duration}</td>
-                <td style={{padding:"10px 12px"}}><Badge color={c.result==="Interesse"?T.green:c.result==="Sem interesse"?T.red:T.yellow}>{c.result}</Badge></td>
-                <td style={{padding:"10px 12px",color:T.sub,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.obs}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-      <Modal open={modal} title="Registrar Ligação" onClose={()=>setModal(false)} width={560}>
-        <div style={{marginBottom:14}}><div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Cliente *</div>
+      <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:14,overflow:"hidden"}}>
+        <div style={{overflowX:"auto",maxHeight:"calc(100vh - 260px)"}}>
+          <table style={{width:"max-content",minWidth:"100%",borderCollapse:"collapse",fontSize:12,whiteSpace:"nowrap"}}>
+            <thead><tr style={{background:T.surface}}>
+              {["Cliente","Canal","Data","Hora","Tipo","Resultado/Status","Observação",""].map(h=>(
+                <th key={h} style={{padding:"9px 12px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:10,borderBottom:`1px solid ${T.border}`}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {myAcs.length===0&&<tr><td colSpan={8} style={{padding:28,textAlign:"center",color:T.muted}}>Nenhum registro.</td></tr>}
+              {myAcs.map(a=>{
+                const cl=clients.find(c=>c.id===a.client_id);
+                const canal=ch(a.canal);
+                const res=a.result||a.status_val||null;
+                const resColor=a.result==="Interesse"?T.green:a.result==="Sem interesse"?T.red:T.yellow;
+                return(
+                  <tr key={a.id} style={{borderBottom:`1px solid ${T.border}15`}}>
+                    <td style={{padding:"9px 12px"}}>{cl?<button onClick={()=>openView(cl.id,cl.name)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit"}}>{cl.name}</button>:<span style={{color:T.muted}}>—</span>}</td>
+                    <td style={{padding:"9px 12px"}}><span style={{background:canal.color+"22",color:canal.color,border:`1px solid ${canal.color}40`,borderRadius:6,padding:"2px 8px",fontSize:11,fontWeight:700}}>{canal.icon} {canal.name}</span></td>
+                    <td style={{padding:"9px 12px",color:T.sub}}>{a.date}</td>
+                    <td style={{padding:"9px 12px",color:T.sub}}>{a.time||"—"}</td>
+                    <td style={{padding:"9px 12px",color:T.sub}}>{a.type||"—"}</td>
+                    <td style={{padding:"9px 12px"}}>{res?<Badge color={resColor}>{res}</Badge>:<span style={{color:T.muted}}>—</span>}</td>
+                    <td style={{padding:"9px 12px",color:T.muted,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis"}}>{a.obs||"—"}</td>
+                    <td style={{padding:"9px 12px"}}>{a.canal==="WHATSAPP"&&<button onClick={()=>openWA(a.client_id)} style={{background:T.green+"22",border:`1px solid ${T.green}40`,borderRadius:6,padding:"3px 9px",fontSize:11,color:T.green,cursor:"pointer",fontWeight:600}}>💬 Abrir</button>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <Modal open={modal} title="Registrar Acionamento" onClose={()=>setModal(false)} width={560}>
+        <div style={{marginBottom:14}}>
+          <div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Cliente *</div>
           <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,width:"100%"}} value={form.client_id} onChange={e=>setForm(f=>({...f,client_id:e.target.value}))}>
-            <option value="">Selecione...</option>{myClients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+            <option value="">Selecione...</option>
+            {myClients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
-          <Input label="Data" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
-          <Input label="Hora (automática)" value={form.time} onChange={v=>setForm(f=>({...f,time:v}))} type="time"/>
-          <Input label="Tipo" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={CALL_TYPES}/>
-          <Input label="Resultado" value={form.result} onChange={v=>setForm(f=>({...f,result:v}))} options={CALL_RESULTS}/>
-          <Input label="Duração — Minutos" value={form.duration_min} onChange={v=>setForm(f=>({...f,duration_min:v}))} type="number" min="0"/>
-          <Input label="Duração — Segundos" value={form.duration_sec} onChange={v=>setForm(f=>({...f,duration_sec:v}))} type="number" min="0" max="59"/>
-        </div>
-        <Input label="Observações" value={form.obs} onChange={v=>setForm(f=>({...f,obs:v}))} placeholder="Detalhes da ligação..."/>
-        <div style={{background:T.surface,borderRadius:8,border:`1px solid ${T.border}`,padding:"12px 14px",marginBottom:14}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:fuForm.active?12:0}}>
-            <input type="checkbox" id="fu_calls" checked={fuForm.active} onChange={e=>setFuForm(f=>({...f,active:e.target.checked}))}/>
-            <label htmlFor="fu_calls" style={{color:T.sub,fontSize:13,cursor:"pointer",fontWeight:600}}>📌 Agendar Follow-up</label>
+        <div style={{marginBottom:16}}>
+          <div style={{color:T.sub,fontSize:12,marginBottom:8,fontWeight:600}}>Canal de Acionamento *</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            {channels.map(canal=>(
+              <button key={canal.code} onClick={()=>setForm(f=>({...f,canal:canal.code,type:canal.code==="LIGACAO"?"Atendida":"Enviado"}))}
+                style={{flex:1,padding:"12px",borderRadius:10,border:`2px solid ${form.canal===canal.code?canal.color:T.border}`,background:form.canal===canal.code?canal.color+"22":"transparent",color:form.canal===canal.code?canal.color:T.sub,fontWeight:700,fontSize:15,cursor:"pointer",fontFamily:"inherit",transition:"all .15s"}}>
+                {canal.icon} {canal.name}
+              </button>
+            ))}
           </div>
-          {fuForm.active&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px",marginTop:8}}>
-            <Input label="Data" value={fuForm.date} onChange={v=>setFuForm(f=>({...f,date:v}))} type="date"/>
-            <Input label="Tipo" value={fuForm.type} onChange={v=>setFuForm(f=>({...f,type:v}))} options={["Ligação","WhatsApp","Reunião"]}/>
-            <div style={{gridColumn:"1/-1"}}><Input label="Descrição" value={fuForm.description} onChange={v=>setFuForm(f=>({...f,description:v}))} placeholder="O que fazer?"/></div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 14px"}}>
+          <Input label="Data" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
+          <Input label="Hora" value={form.time} onChange={v=>setForm(f=>({...f,time:v}))} type="time"/>
+          {isLig&&<>
+            <Input label="Tipo" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={["Atendida","Não atendida","Caixa Postal"]}/>
+            <Input label="Resultado" value={form.result} onChange={v=>setForm(f=>({...f,result:v}))} options={["Interesse","Sem interesse","Retornar"]}/>
+            <Input label="Duração — min" value={form.duration_min} onChange={v=>setForm(f=>({...f,duration_min:v}))} type="number" min="0"/>
+            <Input label="Duração — seg" value={form.duration_sec} onChange={v=>setForm(f=>({...f,duration_sec:v}))} type="number" min="0" max="59"/>
+          </>}
+          {!isLig&&<>
+            <Input label="Tipo" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={["Enviado","Recebido"]}/>
+            <Input label="Status" value={form.status_val} onChange={v=>setForm(f=>({...f,status_val:v}))} options={["Enviado","Visualizado","Respondido"]}/>
+          </>}
+        </div>
+        <Input label="Observações" value={form.obs} onChange={v=>setForm(f=>({...f,obs:v}))} placeholder="O que foi discutido?"/>
+        <div style={{background:T.surface,borderRadius:8,border:`1px solid ${T.border}`,padding:"12px 14px",marginBottom:12}}>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:form.fu_active?12:0}}>
+            <input type="checkbox" checked={form.fu_active} onChange={e=>setForm(f=>({...f,fu_active:e.target.checked}))}/>
+            <span style={{color:T.sub,fontSize:13,fontWeight:600}}>📌 Agendar Follow-up</span>
+          </label>
+          {form.fu_active&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px",marginTop:8}}>
+            <Input label="Data" value={form.fu_date} onChange={v=>setForm(f=>({...f,fu_date:v}))} type="date"/>
+            <Input label="Tipo" value={form.fu_type} onChange={v=>setForm(f=>({...f,fu_type:v}))} options={["Ligação","WhatsApp","Reunião"]}/>
+            <div style={{gridColumn:"1/-1"}}><Input label="Descrição" value={form.fu_desc} onChange={v=>setForm(f=>({...f,fu_desc:v}))} placeholder="O que fazer?"/></div>
           </div>}
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.surface,borderRadius:8,border:`1px solid ${T.border}`}}>
-          <input type="checkbox" id="sm" checked={schedMeeting} onChange={e=>setSchedMeeting(e.target.checked)}/>
-          <label htmlFor="sm" style={{color:T.sub,fontSize:13,cursor:"pointer"}}>📅 Agendar Reunião</label>
+        <div style={{background:T.surface,borderRadius:8,border:`1px solid ${T.border}`,padding:"10px 14px",marginBottom:14}}>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer"}}>
+            <input type="checkbox" checked={form.sched_meeting} onChange={e=>setForm(f=>({...f,sched_meeting:e.target.checked}))}/>
+            <span style={{color:T.sub,fontSize:13}}>📅 Agendar Reunião após salvar</span>
+          </label>
         </div>
         <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
           <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
-          <Btn onClick={save}>Salvar</Btn>
-        </div>
-      </Modal>
-      {viewModal}
-    </div>
-  );
-}
-
-// ─── WHATSAPP ────────────────────────────────────────────────
-function Whatsapp({user,preClient,onSaved}){
-  const {open:openView, modal:viewModal} = useClientView();
-  const[whats,setWhats]=useState([]);const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
-  const[modal,setModal]=useState(false);
-  const emptyForm={client_id:"",date:today(),time:nowTime(),type:"Enviado",content:"",status:"Enviado"};
-  const[form,setForm]=useState(emptyForm);
-  const[fuFormW,setFuFormW]=useState({active:false,date:"",type:"WhatsApp",description:""});
-  const[schedMeetingW,setSchedMeetingW]=useState(false);
-  const[fType,setFType]=useState("");const[fStatus,setFStatus]=useState("");const[fDate,setFDate]=useState("");const[fMonth,setFMonth]=useState("");
-  const load=useCallback(async()=>{
-    const[w,c]=await Promise.all([supabase.from("whatsapp_logs").select("*").order("created_at",{ascending:false}),supabase.from("clients").select("id,name,responsible,whatsapp")]);
-    setWhats(w.data||[]);setClients(c.data||[]);setLoading(false);
-  },[]);
-  useEffect(()=>{load();},[load]);
-  useEffect(()=>{if(preClient){setForm(f=>({...f,client_id:preClient.id}));setModal(true);}}, [preClient]);
-  const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
-  const myWhats=(user.role==="vendedor"?whats.filter(w=>w.user_id===user.id):whats).filter(w=>(!fType||w.type===fType)&&(!fStatus||w.status===fStatus)&&(!fDate||w.date===fDate)&&(!fMonth||w.date?.startsWith(fMonth)));
-  async function save(){
-    if(!form.client_id)return alert("Selecione um cliente.");
-    const {error:wErr}=await supabase.from("whatsapp_logs").insert({
-      client_id: form.client_id,
-      user_id: user.id,
-      date: form.date,
-      time: form.time,
-      type: form.type,
-      content: form.content,
-      status: form.status,
-    });
-    if(wErr){console.error(wErr);alert("Erro ao salvar WhatsApp: "+wErr.message);return;}
-    if(fuFormW.active && fuFormW.date){
-      await supabase.from("followups").insert({client_id:form.client_id,user_id:user.id,date:fuFormW.date,type:fuFormW.type,description:fuFormW.description,status:"Pendente"});
-    }
-    const savedClient=myClients.find(c=>c.id===form.client_id);
-    await load();
-    setModal(false);
-    setFuFormW({active:false,date:"",type:"WhatsApp",description:""});
-    if(onSaved && savedClient) onSaved(savedClient, schedMeetingW);
-    setSchedMeetingW(false);
-  }
-  function openWhatsApp(clientId){const c=clients.find(c=>c.id===clientId);if(!c?.whatsapp)return alert("Cliente sem WhatsApp cadastrado.");const num=c.whatsapp.replace(/\D/g,"");window.open(`https://wa.me/55${num}`,"_blank");}
-  if(loading)return<Spinner/>;
-  return(
-    <div>
-      <div style={{display:"flex",justifyContent:"space-between",marginBottom:16,gap:8,flexWrap:"wrap",alignItems:"center"}}>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fMonth} onChange={e=>setFMonth(e.target.value)}/>
-          <input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 12px",fontSize:12,fontFamily:"inherit"}} value={fDate} onChange={e=>setFDate(e.target.value)}/>
-        </div>
-        <Btn onClick={()=>{setForm(emptyForm);setModal(true);}}>+ Registrar WhatsApp</Btn>
-      </div>
-      <Card style={{padding:0,overflow:"hidden"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead><tr>
-            <ThFilter label="Cliente" value="" onChange={()=>{}}/>
-            <ThFilter label="Data" value={fDate} onChange={setFDate}/>
-            <ThFilter label="Hora" value="" onChange={()=>{}}/>
-            <ThFilter label="Tipo" value={fType} onChange={setFType} options={WHATS_TYPES}/>
-            <ThFilter label="Resumo" value="" onChange={()=>{}}/>
-            <ThFilter label="Status" value={fStatus} onChange={setFStatus} options={["Enviado","Visualizado","Respondido"]}/>
-            <ThFilter label="Ação" value="" onChange={()=>{}}/>
-          </tr></thead>
-          <tbody>
-            {myWhats.length===0&&<tr><td colSpan={7} style={{padding:32,textAlign:"center",color:T.muted}}>Nenhuma conversa registrada.</td></tr>}
-            {myWhats.map(w=>(
-              <tr key={w.id} style={{borderBottom:`1px solid ${T.border}15`}}>
-                <td style={{padding:"10px 12px"}}>{(()=>{const cl=clients.find(c=>c.id===w.client_id);return cl?<button onClick={()=>openView(cl.id,cl.name)} style={{background:"none",border:"none",color:T.accent,fontWeight:700,fontSize:12,cursor:"pointer",textDecoration:"underline",padding:0,fontFamily:"inherit"}}>{cl.name}</button>:<span style={{color:T.muted}}>—</span>;})()}</td>
-                <td style={{padding:"10px 12px",color:T.sub}}>{w.date}</td>
-                <td style={{padding:"10px 12px",color:T.sub}}>{w.time||"—"}</td>
-                <td style={{padding:"10px 12px"}}><Badge color={w.type==="Enviado"?T.accent:T.green}>{w.type}</Badge></td>
-                <td style={{padding:"10px 12px",color:T.sub,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{w.content}</td>
-                <td style={{padding:"10px 12px"}}><Badge color={T.muted}>{w.status}</Badge></td>
-                <td style={{padding:"10px 12px"}}><Btn size="sm" variant="success" onClick={()=>openWhatsApp(w.client_id)} style={{fontSize:11}}>💬 Abrir</Btn></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-      <Modal open={modal} title="Registrar WhatsApp" onClose={()=>setModal(false)}>
-        <div style={{marginBottom:14}}><div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Cliente *</div>
-          <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,width:"100%"}} value={form.client_id} onChange={e=>setForm(f=>({...f,client_id:e.target.value}))}>
-            <option value="">Selecione...</option>{myClients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 16px"}}>
-          <Input label="Data" value={form.date} onChange={v=>setForm(f=>({...f,date:v}))} type="date"/>
-          <Input label="Hora (automática)" value={form.time} onChange={v=>setForm(f=>({...f,time:v}))} type="time"/>
-          <Input label="Tipo" value={form.type} onChange={v=>setForm(f=>({...f,type:v}))} options={WHATS_TYPES}/>
-          <Input label="Status" value={form.status} onChange={v=>setForm(f=>({...f,status:v}))} options={["Enviado","Visualizado","Respondido"]}/>
-        </div>
-        <Input label="Conteúdo / Resumo" value={form.content} onChange={v=>setForm(f=>({...f,content:v}))} placeholder="Descreva o conteúdo..."/>
-        <div style={{background:T.surface,borderRadius:8,border:`1px solid ${T.border}`,padding:"12px 14px",marginBottom:14}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:fuFormW.active?12:0}}>
-            <input type="checkbox" id="fu_w" checked={fuFormW.active} onChange={e=>setFuFormW(f=>({...f,active:e.target.checked}))}/>
-            <label htmlFor="fu_w" style={{color:T.sub,fontSize:13,cursor:"pointer",fontWeight:600}}>📌 Agendar Follow-up</label>
-          </div>
-          {fuFormW.active&&<div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px",marginTop:8}}>
-            <Input label="Data" value={fuFormW.date} onChange={v=>setFuFormW(f=>({...f,date:v}))} type="date"/>
-            <Input label="Tipo" value={fuFormW.type} onChange={v=>setFuFormW(f=>({...f,type:v}))} options={["Ligação","WhatsApp","Reunião"]}/>
-            <div style={{gridColumn:"1/-1"}}><Input label="Descrição" value={fuFormW.description} onChange={v=>setFuFormW(f=>({...f,description:v}))} placeholder="O que fazer?"/></div>
-          </div>}
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,padding:"10px 14px",background:T.surface,borderRadius:8,border:`1px solid ${T.border}`}}>
-          <input type="checkbox" id="smw" checked={schedMeetingW} onChange={e=>setSchedMeetingW(e.target.checked)}/>
-          <label htmlFor="smw" style={{color:T.sub,fontSize:13,cursor:"pointer"}}>📅 Agendar Reunião</label>
-        </div>
-        <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
-          <Btn variant="ghost" onClick={()=>setModal(false)}>Cancelar</Btn>
-          <Btn onClick={save}>Salvar</Btn>
+          <Btn onClick={save}>Salvar Acionamento</Btn>
         </div>
       </Modal>
       {viewModal}
@@ -1866,6 +1794,114 @@ Os clientes com este status manterão o valor, mas ele não aparecerá mais como
   );
 }
 
+
+// ─── STATUS EDITOR ───────────────────────────────────────────
+function StatusEditor(){
+  const [statuses,setStatuses]=useState(()=>getStatusList());
+  const [newName,setNewName]=useState("");
+  const [newColor,setNewColor]=useState("#3B82F6");
+  const [editIdx,setEditIdx]=useState(null);
+  const [editVal,setEditVal]=useState("");
+  const [editColor,setEditColor]=useState("");
+  function persist(list){setStatuses(list);localStorage.setItem("krcf_statuses_v2",JSON.stringify(list));}
+  function add(){const v=newName.trim();if(!v)return;if(statuses.find(s=>s.name===v))return alert("Já existe!");persist([...statuses,{name:v,color:newColor}]);setNewName("");setNewColor("#3B82F6");}
+  function remove(idx){if(!confirm(`Remover "${statuses[idx].name}"?`))return;persist(statuses.filter((_,i)=>i!==idx));}
+  function startEdit(idx){setEditIdx(idx);setEditVal(statuses[idx].name);setEditColor(statuses[idx].color);}
+  function saveEdit(){const v=editVal.trim();if(!v)return;persist(statuses.map((s,i)=>i===editIdx?{name:v,color:editColor}:s));setEditIdx(null);}
+  return(
+    <div>
+      <Card style={{marginBottom:14,background:T.accent+"0A",border:`1px solid ${T.accent}20`}}>
+        <div style={{fontSize:12,color:T.sub,lineHeight:1.7}}>💡 Os status definidos aqui aparecerão nos formulários de clientes. As cores são exibidas como tags visuais.</div>
+      </Card>
+      <Card>
+        <div style={{fontSize:13,fontWeight:700,color:T.sub,marginBottom:14}}>🏷 Status de Clientes</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:18}}>
+          {statuses.map((s,idx)=>(
+            <div key={idx} style={{display:"flex",alignItems:"center",gap:10,background:T.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${T.border}`}}>
+              {editIdx===idx?(
+                <>
+                  <input type="color" value={editColor} onChange={e=>setEditColor(e.target.value)} style={{width:28,height:28,borderRadius:6,border:"none",cursor:"pointer"}}/>
+                  <input autoFocus style={{flex:1,background:"transparent",border:"none",color:T.text,fontSize:13,fontFamily:"inherit",outline:"none"}} value={editVal} onChange={e=>setEditVal(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")saveEdit();if(e.key==="Escape")setEditIdx(null);}}/>
+                  <Btn size="sm" variant="success" onClick={saveEdit}>✓</Btn>
+                  <button onClick={()=>setEditIdx(null)} style={{background:"none",border:"none",color:T.muted,fontSize:18,cursor:"pointer"}}>×</button>
+                </>
+              ):(
+                <>
+                  <div style={{width:14,height:14,borderRadius:"50%",background:s.color,flexShrink:0}}/>
+                  <span style={{flex:1,color:T.text,fontSize:13}}>{s.name}</span>
+                  <Badge color={s.color}>{s.name}</Badge>
+                  <button onClick={()=>startEdit(idx)} style={{background:"none",border:"none",color:T.muted,cursor:"pointer",fontSize:15}}>✏️</button>
+                  <button onClick={()=>remove(idx)} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:15}}>🗑</button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <input type="color" value={newColor} onChange={e=>setNewColor(e.target.value)} style={{width:36,height:36,borderRadius:8,border:`1px solid ${T.border}`,cursor:"pointer"}}/>
+          <input style={{flex:1,background:T.surface,border:`1px solid ${T.purple}40`,borderRadius:8,color:T.text,padding:"9px 14px",fontSize:13,fontFamily:"inherit",outline:"none"}} placeholder="Novo status... (Enter para adicionar)" value={newName} onChange={e=>setNewName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()}/>
+          <Btn disabled={!newName.trim()} onClick={add}>Adicionar</Btn>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ─── CHANNEL EDITOR ──────────────────────────────────────────
+function ChannelEditor(){
+  const [channels,setChannels]=useState(()=>getChannels());
+  const [newName,setNewName]=useState("");
+  const [newCode,setNewCode]=useState("");
+  const [newIcon,setNewIcon]=useState("📋");
+  const [newColor,setNewColor]=useState("#3B82F6");
+  function persist(list){setChannels(list);localStorage.setItem("krcf_channels",JSON.stringify(list));}
+  function add(){
+    const name=newName.trim(),code=newCode.trim().toUpperCase().replace(/\s/g,"_");
+    if(!name||!code)return alert("Nome e código são obrigatórios.");
+    if(channels.find(c=>c.code===code))return alert("Código já existe!");
+    persist([...channels,{name,code,icon:newIcon,color:newColor}]);
+    setNewName("");setNewCode("");setNewIcon("📋");setNewColor("#3B82F6");
+  }
+  function remove(code){
+    if(["LIGACAO","WHATSAPP"].includes(code))return alert("Canais padrão não podem ser removidos.");
+    if(!confirm("Remover canal?"))return;
+    persist(channels.filter(c=>c.code!==code));
+  }
+  return(
+    <Card>
+      <div style={{fontSize:13,fontWeight:700,color:T.sub,marginBottom:14}}>📡 Canais de Acionamento</div>
+      <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:18}}>
+        {channels.map(c=>(
+          <div key={c.code} style={{display:"flex",alignItems:"center",gap:10,background:T.surface,borderRadius:8,padding:"10px 14px",border:`1px solid ${T.border}`}}>
+            <span style={{fontSize:20}}>{c.icon}</span>
+            <div style={{flex:1}}><div style={{fontWeight:700,color:T.text,fontSize:13}}>{c.name}</div><div style={{color:T.muted,fontSize:11}}>Código: {c.code}</div></div>
+            <Badge color={c.color}>{c.name}</Badge>
+            {!["LIGACAO","WHATSAPP"].includes(c.code)&&<button onClick={()=>remove(c.code)} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:15}}>🗑</button>}
+            {["LIGACAO","WHATSAPP"].includes(c.code)&&<span style={{color:T.muted,fontSize:11}}>padrão</span>}
+          </div>
+        ))}
+      </div>
+      <div style={{background:T.surface,borderRadius:10,padding:16,border:`1px solid ${T.border}`}}>
+        <div style={{fontSize:12,fontWeight:600,color:T.sub,marginBottom:12}}>+ Novo Canal</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 12px"}}>
+          <Input label="Nome" value={newName} onChange={setNewName} placeholder="Ex: Email, Visita..."/>
+          <Input label="Código" value={newCode} onChange={setNewCode} placeholder="Ex: EMAIL, VISITA"/>
+          <div style={{marginBottom:12}}>
+            <div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Ícone (emoji)</div>
+            <input style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:20,width:"100%",fontFamily:"inherit",outline:"none"}} value={newIcon} onChange={e=>setNewIcon(e.target.value)} placeholder="📋"/>
+          </div>
+          <div style={{marginBottom:12}}>
+            <div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Cor</div>
+            <input type="color" value={newColor} onChange={e=>setNewColor(e.target.value)} style={{width:"100%",height:38,borderRadius:8,border:`1px solid ${T.border}`,cursor:"pointer"}}/>
+          </div>
+        </div>
+        <Btn disabled={!newName.trim()||!newCode.trim()} onClick={add}>+ Criar Canal</Btn>
+      </div>
+    </Card>
+  );
+}
+
+
 // ─── SETTINGS ────────────────────────────────────────────────
 function Settings({user,profiles,loadProfiles}){
   const[tab,setTab]=useState("users");const[modal,setModal]=useState(false);
@@ -1882,14 +1918,16 @@ function Settings({user,profiles,loadProfiles}){
   async function resetSystem(){
     if(resetConfirm!=="RESETAR")return alert("Digite RESETAR para confirmar.");
     if(!confirm("ATENÇÃO: Esta ação apagará TODOS os dados do sistema (clientes, ligações, metas, etc). Deseja continuar?"))return;
+    const UUID0="00000000-0000-0000-0000-000000000000";
     await Promise.all([
-      supabase.from("calls").delete().neq("id","00000000-0000-0000-0000-000000000000"),
-      supabase.from("whatsapp_logs").delete().neq("id","00000000-0000-0000-0000-000000000000"),
-      supabase.from("followups").delete().neq("id","00000000-0000-0000-0000-000000000000"),
-      supabase.from("meetings").delete().neq("id","00000000-0000-0000-0000-000000000000"),
-      supabase.from("goals").delete().neq("id","00000000-0000-0000-0000-000000000000"),
-      supabase.from("campaigns").delete().neq("id","00000000-0000-0000-0000-000000000000"),
-      supabase.from("clients").delete().neq("id","00000000-0000-0000-0000-000000000000"),
+      supabase.from("acionamentos").delete().neq("id",UUID0),
+      supabase.from("calls").delete().neq("id",UUID0),
+      supabase.from("whatsapp_logs").delete().neq("id",UUID0),
+      supabase.from("followups").delete().neq("id",UUID0),
+      supabase.from("meetings").delete().neq("id",UUID0),
+      supabase.from("goals").delete().neq("id",UUID0),
+      supabase.from("campaigns").delete().neq("id",UUID0),
+      supabase.from("clients").delete().neq("id",UUID0),
     ]);
     alert("Sistema resetado com sucesso!");
     setResetModal(false);setResetConfirm("");
@@ -1898,7 +1936,7 @@ function Settings({user,profiles,loadProfiles}){
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
-        {[["users","👤 Usuários"],["segments","🗂 Segmentos"],["origins","🌐 Origens"],["statuses","🏷 Status"],["danger","⚠️ Sistema"]].map(([k,v])=><Btn key={k} variant={tab===k?"primary":"ghost"} onClick={()=>setTab(k)}>{v}</Btn>)}
+        {[["users","👤 Usuários"],["segments","🗂 Segmentos"],["origins","🌐 Origens"],["statuses","🏷 Status"],["channels","📡 Canais"],["danger","⚠️ Sistema"]].map(([k,v])=><Btn key={k} variant={tab===k?"primary":"ghost"} onClick={()=>setTab(k)}>{v}</Btn>)}
       </div>
       {tab==="users"&&<>
         <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}><Btn size="sm" onClick={()=>{setForm({name:"",email:"",password:"",role:"vendedor"});setModal(true);}}>+ Novo Usuário</Btn></div>
@@ -1916,6 +1954,7 @@ function Settings({user,profiles,loadProfiles}){
       {tab==="segments"&&<EditableList title="Segmentos" table="segments" color={T.accent} icon="🗂"/>}
       {tab==="origins"&&<EditableList title="Origens de Leads" table="origins" color={T.purple} icon="🌐"/>}
       {tab==="statuses"&&<StatusEditor/>}
+      {tab==="channels"&&<ChannelEditor/>}
       {tab==="danger"&&<Card style={{border:`1px solid ${T.red}40`}}>
         <div style={{fontSize:15,fontWeight:700,color:T.red,marginBottom:8}}>⚠️ Zona de Perigo</div>
         <div style={{color:T.sub,fontSize:13,marginBottom:20}}>Estas ações são irreversíveis. Use com extremo cuidado.</div>
@@ -2865,12 +2904,11 @@ function LeadsSearch({ user }) {
 
 // ─── MENU E APP ATUALIZADOS ───────────────────────────────────
 const MENU = [
-  { id: "dashboard", label: "Dashboard",       icon: "📊" },
-  { id: "clients",   label: "Clientes",         icon: "👥" },
-  { id: "calls",     label: "Ligações",         icon: "📞" },
-  { id: "whatsapp",  label: "WhatsApp",         icon: "💬" },
-  { id: "followups", label: "Follow-ups",       icon: "⏰" },
-  { id: "meetings",  label: "Reuniões",         icon: "📅" },
+  { id: "dashboard",    label: "Dashboard",        icon: "📊" },
+  { id: "clients",      label: "Clientes",          icon: "👥" },
+  { id: "acionamentos", label: "Acionamentos",      icon: "🎯" },
+  { id: "followups",    label: "Follow-ups",        icon: "⏰" },
+  { id: "meetings",     label: "Reuniões",          icon: "📅" },
   { id: "goals",     label: "Metas",            icon: "🎯" },
   { id: "reports",   label: "Relatórios IA",    icon: "🤖" },
   { id: "sales",     label: "Técnicas de Venda",icon: "🧠" },
@@ -2879,8 +2917,8 @@ const MENU = [
 ];
 
 const PT = {
-  dashboard: "📊 Dashboard", clients: "👥 Clientes", calls: "📞 Ligações",
-  whatsapp: "💬 WhatsApp", followups: "⏰ Follow-ups", meetings: "📅 Reuniões",
+  dashboard: "📊 Dashboard", clients: "👥 Clientes", acionamentos: "🎯 Acionamentos",
+  followups: "⏰ Follow-ups", meetings: "📅 Reuniões",
   goals: "🎯 Metas", reports: "🤖 Relatórios IA", sales: "🧠 Técnicas de Venda",
   settings: "⚙️ Configurações"
 };
@@ -2992,9 +3030,8 @@ export default function App() {
         <div style={{ flex: 1, overflow: "auto", padding: "28px 32px" }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: T.text, marginBottom: 24 }}>{PT[page]}</div>
           {page === "dashboard" && <Dashboard user={authUser} profiles={profiles} onNav={p => setPage(p)} />}
-          {page === "clients"   && <Clients   user={authUser} profiles={profiles} onQuickCall={c => handleQuick(c, "calls")} onQuickWhats={c => handleQuick(c, "whatsapp")} onQuickFU={c => handleQuick(c, "followups")} />}
-          {page === "calls"     && <Calls     user={authUser} profiles={profiles} preClient={preClient} onSaved={showFuReminder} />}
-          {page === "whatsapp"  && <Whatsapp  user={authUser} preClient={preClient} onSaved={showFuReminder} />}
+          {page === "clients"      && <Clients   user={authUser} profiles={profiles} onQuickAc={(c,canal)=>{setQuickClient(c);setQuickTarget("acionamentos");setPage("acionamentos");}} onQuickFU={c=>handleQuick(c,"followups")} />}
+          {page === "acionamentos" && <Acionamentos user={authUser} profiles={profiles} preClient={preClient} preCanal={null} />}
           {page === "followups" && <Followups user={authUser} preClient={preClient} />}
           {page === "meetings"  && <Meetings  user={authUser} profiles={profiles} preClient={preClient} onMarkRealizada={showMeetingOutcome} />}
           {page === "goals"     && <Goals     user={authUser} profiles={profiles} />}
