@@ -13,7 +13,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─────────────────────────────────────────────────────────────
 // 2. ANTHROPIC IA — Cole SUA CHAVE entre as aspas na linha abaixo:
-const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA"; // ex: sk-ant-api03-...
+const ANTHROPIC_KEY = "COLE_SUA_CHAVE_AQUI"; // ex: sk-ant-api03-...
 // ─────────────────────────────────────────────────────────────
 
 // ─── THEME ───────────────────────────────────────────────────
@@ -1799,6 +1799,108 @@ function ChannelEditor(){
 }
 
 
+
+// ─── AI KEY EDITOR ───────────────────────────────────────────
+function AIKeyEditor() {
+  const [key, setKey] = useState(() => localStorage.getItem("krcf_anthropic_key") || "");
+  const [saved, setSaved] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState("");
+
+  function saveKey() {
+    const trimmed = key.trim();
+    if (!trimmed) { localStorage.removeItem("krcf_anthropic_key"); }
+    else { localStorage.setItem("krcf_anthropic_key", trimmed); }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
+  }
+
+  async function testKey() {
+    setTesting(true); setTestResult("");
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": key.trim(),
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 10,
+          messages: [{ role: "user", content: "Responda apenas: OK" }]
+        })
+      });
+      if (r.ok) {
+        setTestResult("✅ Chave válida! IA funcionando.");
+      } else {
+        const e = await r.json();
+        setTestResult("❌ Erro: " + (e.error?.message || r.status));
+      }
+    } catch (e) {
+      setTestResult("❌ " + e.message);
+    }
+    setTesting(false);
+  }
+
+  const isPlaceholder = !key || key === "COLE_SUA_CHAVE_AQUI";
+
+  return (
+    <div>
+      <Card style={{ marginBottom: 14, background: T.accent + "0A", border: `1px solid ${T.accent}20` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 8 }}>🤖 Configurar Chave da Anthropic (IA)</div>
+        <div style={{ color: T.sub, fontSize: 12, lineHeight: 1.8 }}>
+          A chave é necessária para usar <strong style={{color:T.text}}>Relatórios IA</strong>, <strong style={{color:T.text}}>Técnicas de Venda</strong> e outros recursos de inteligência artificial.<br/>
+          Obtenha sua chave em: <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color: T.accent }}>console.anthropic.com</a> → API Keys → Create Key
+        </div>
+      </Card>
+      <Card>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ color: T.sub, fontSize: 12, marginBottom: 6, fontWeight: 600 }}>
+            Chave da API Anthropic
+            {!isPlaceholder && <span style={{ color: T.green, marginLeft: 8, fontSize: 11 }}>● Configurada</span>}
+            {isPlaceholder && <span style={{ color: T.yellow, marginLeft: 8, fontSize: 11 }}>● Não configurada</span>}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              type="password"
+              style={{ flex: 1, background: T.surface, border: `1px solid ${isPlaceholder ? T.yellow : T.green}60`, borderRadius: 8, color: T.text, padding: "10px 14px", fontSize: 13, fontFamily: "inherit", outline: "none" }}
+              placeholder="sk-ant-api03-..."
+              value={key}
+              onChange={e => setKey(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && saveKey()}
+            />
+            <Btn onClick={saveKey} variant={saved ? "success" : "primary"}>
+              {saved ? "✓ Salvo!" : "Salvar"}
+            </Btn>
+            <Btn onClick={testKey} variant="ghost" disabled={isPlaceholder || testing}>
+              {testing ? "Testando..." : "Testar"}
+            </Btn>
+          </div>
+          {testResult && (
+            <div style={{ marginTop: 10, padding: "8px 14px", background: T.surface, borderRadius: 8, fontSize: 13, color: testResult.startsWith("✅") ? T.green : T.red }}>
+              {testResult}
+            </div>
+          )}
+        </div>
+        <div style={{ background: T.surface, borderRadius: 8, padding: 14, border: `1px solid ${T.border}` }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: T.muted, marginBottom: 8 }}>📋 Como obter sua chave:</div>
+          <div style={{ fontSize: 12, color: T.muted, lineHeight: 2 }}>
+            1. Acesse <a href="https://console.anthropic.com" target="_blank" rel="noreferrer" style={{ color: T.accent }}>console.anthropic.com</a><br/>
+            2. Faça login ou crie uma conta<br/>
+            3. Clique em <strong style={{color:T.sub}}>API Keys</strong> no menu lateral<br/>
+            4. Clique em <strong style={{color:T.sub}}>Create Key</strong><br/>
+            5. Copie a chave que começa com <code style={{background:T.card,padding:"1px 6px",borderRadius:4,color:T.accent}}>sk-ant-api03-</code><br/>
+            6. Cole aqui e clique em <strong style={{color:T.sub}}>Salvar</strong>
+          </div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+
 // ─── SETTINGS ────────────────────────────────────────────────
 function Settings({user,profiles,loadProfiles}){
   const[tab,setTab]=useState("users");const[modal,setModal]=useState(false);
@@ -1828,7 +1930,7 @@ function Settings({user,profiles,loadProfiles}){
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
-        {[["users","👤 Usuários"],["segments","🗂 Segmentos"],["origins","🌐 Origens"],["statuses","🏷 Status"],["channels","📡 Canais"],["danger","⚠️ Sistema"]].map(([k,v])=><Btn key={k} variant={tab===k?"primary":"ghost"} onClick={()=>setTab(k)}>{v}</Btn>)}
+        {[["users","👤 Usuários"],["segments","🗂 Segmentos"],["origins","🌐 Origens"],["statuses","🏷 Status"],["channels","📡 Canais"],["ai","🤖 IA"],["danger","⚠️ Sistema"]].map(([k,v])=><Btn key={k} variant={tab===k?"primary":"ghost"} onClick={()=>setTab(k)}>{v}</Btn>)}
       </div>
       {tab==="users"&&<>
         <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}><Btn size="sm" onClick={()=>{setForm({name:"",email:"",password:"",role:"vendedor"});setModal(true);}}>+ Novo Usuário</Btn></div>
@@ -1847,6 +1949,7 @@ function Settings({user,profiles,loadProfiles}){
       {tab==="origins"&&<EditableList title="Origens de Leads" table="origins" color={T.purple} icon="🌐"/>}
       {tab==="statuses"&&<StatusEditor/>}
       {tab==="channels"&&<ChannelEditor/>}
+      {tab==="ai"&&<AIKeyEditor/>}
       {tab==="danger"&&<Card style={{border:`1px solid ${T.red}40`}}>
         <div style={{fontSize:15,fontWeight:700,color:T.red,marginBottom:8}}>⚠️ Zona de Perigo</div>
         <div style={{color:T.sub,fontSize:13,marginBottom:20}}>Estas ações são irreversíveis. Use com extremo cuidado.</div>
@@ -1891,14 +1994,18 @@ const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 // ─── AI CONFIG ───────────────────────────────────────────────
 async function callAI(prompt, maxTokens = 1000) {
-  if (!ANTHROPIC_KEY) {
-    throw new Error("Configure a ANTHROPIC_KEY no topo do arquivo (linha com sk-ant-)");
+  // Use hardcoded key first, then localStorage fallback
+  const key = (ANTHROPIC_KEY && ANTHROPIC_KEY !== "COLE_SUA_CHAVE_AQUI")
+    ? ANTHROPIC_KEY
+    : (localStorage.getItem("krcf_anthropic_key") || "");
+  if (!key || key === "COLE_SUA_CHAVE_AQUI") {
+    throw new Error("Chave da Anthropic não configurada. Vá em Configurações > IA e cole sua chave sk-ant-...");
   }
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_KEY,
+      "x-api-key": key,
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true"
     },
