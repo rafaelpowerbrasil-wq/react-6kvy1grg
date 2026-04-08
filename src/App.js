@@ -13,7 +13,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─────────────────────────────────────────────────────────────
 // 2. ANTHROPIC IA — Cole SUA CHAVE entre as aspas na linha abaixo:
-const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
+const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA"; // ex: sk-ant-api03-...
 // ─────────────────────────────────────────────────────────────
 
 // ─── THEME ───────────────────────────────────────────────────
@@ -294,7 +294,6 @@ function Dashboard({user,profiles,onNav}){
     ? goals.filter(g=>g.user_id===user.id&&g.period===period)
     : sellers.map(s=>goals.find(g=>g.user_id===s.id&&g.period===period)).filter(Boolean);
   // For vendedor: filter calls only by own; for admin: team total  
-  const [ws,we]=weekRange();
   const filterCallsForGoal = user.role==="vendedor"
     ? (goalFilter==="day"?allAc.filter(a=>a.date===today()):goalFilter==="week"?allAc.filter(a=>a.date>=ws&&a.date<=we):allAc)
     : (goalFilter==="day"?allAc.filter(a=>a.date===today()):goalFilter==="week"?allAc.filter(a=>a.date>=ws&&a.date<=we):allAc.filter(a=>a.date?.startsWith(dashMonth)));
