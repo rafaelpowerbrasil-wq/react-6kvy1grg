@@ -741,7 +741,7 @@ function Clients({user,profiles,onQuickAc,onQuickFU}){
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
         <input style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,flex:1,minWidth:150,fontFamily:"inherit"}} placeholder="🔍 Buscar..." value={search} onChange={e=>setSearch(e.target.value)}/>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fStatus} onChange={e=>setFStatus(e.target.value)}>
-          <option value="">Status</option>{getStatusList().map(s=><option key={s}>{s}</option>)}
+          <option value="">Status</option>{getStatusList().map(s=><option key={s.name} value={s.name}>{s.name}</option>)}
         </select>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fSeg} onChange={e=>setFSeg(e.target.value)}>
           <option value="">Segmento</option>{segments.map(s=><option key={s}>{s}</option>)}
@@ -815,7 +815,7 @@ function Clients({user,profiles,onQuickAc,onQuickFU}){
           <Input label="Estado" value={form.state} onChange={v=>setForm(f=>({...f,state:v}))}/>
           <Input label="Segmento" value={form.segment} onChange={v=>setForm(f=>({...f,segment:v}))} options={segments}/>
           <Input label="Origem" value={form.origin} onChange={v=>setForm(f=>({...f,origin:v}))} options={origins}/>
-          <Input label="Status" value={form.status} onChange={v=>setForm(f=>({...f,status:v}))} options={getStatusList()}/>
+          <Input label="Status" value={form.status} onChange={v=>setForm(f=>({...f,status:v}))} options={getStatusList().map(s=>s.name)}/>
           {user.role!=="vendedor"&&<div style={{marginBottom:14}}><div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Responsável</div>
             <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,width:"100%"}} value={form.responsible} onChange={e=>setForm(f=>({...f,responsible:e.target.value}))}>
               <option value="">Selecione...</option>{profiles.filter(p=>p.role==="vendedor").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1809,9 +1809,18 @@ function AIKeyEditor() {
 
   function saveKey() {
     const trimmed = key.trim();
-    if (!trimmed) { localStorage.removeItem("krcf_anthropic_key"); }
-    else { localStorage.setItem("krcf_anthropic_key", trimmed); }
+    if (!trimmed) {
+      localStorage.removeItem("krcf_anthropic_key");
+      setSaved(true); setTimeout(() => setSaved(false), 2500);
+      return;
+    }
+    if (!trimmed.startsWith("sk-ant-")) {
+      alert("A chave deve começar com 'sk-ant-'. Verifique se copiou corretamente.");
+      return;
+    }
+    localStorage.setItem("krcf_anthropic_key", trimmed);
     setSaved(true);
+    setTestResult("");
     setTimeout(() => setSaved(false), 2500);
   }
 
@@ -1995,11 +2004,15 @@ const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 // ─── AI CONFIG ───────────────────────────────────────────────
 async function callAI(prompt, maxTokens = 1000) {
   // Use hardcoded key first, then localStorage fallback
-  const key = (ANTHROPIC_KEY && ANTHROPIC_KEY !== "COLE_SUA_CHAVE_AQUI")
+  const rawKey = (ANTHROPIC_KEY && ANTHROPIC_KEY !== "COLE_SUA_CHAVE_AQUI")
     ? ANTHROPIC_KEY
     : (localStorage.getItem("krcf_anthropic_key") || "");
+  const key = rawKey.trim();
   if (!key || key === "COLE_SUA_CHAVE_AQUI") {
     throw new Error("Chave da Anthropic não configurada. Vá em Configurações > IA e cole sua chave sk-ant-...");
+  }
+  if (!key.startsWith("sk-ant-")) {
+    throw new Error("Chave inválida. A chave deve começar com 'sk-ant-'. Verifique em Configurações > 🤖 IA");
   }
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
