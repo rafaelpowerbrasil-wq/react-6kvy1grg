@@ -10,10 +10,10 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 const SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
+
 // 2. ANTHROPIC (IA) — obtenha em console.anthropic.com > API Keys
 // Cole sua chave abaixo entre as aspas:
- "sk-ant-api03-tV5...vwAA"
+const ANTHROPIC_KEY = ""; // ex: sk-ant-api03-xxxxx
 
 // ─── THEME ───────────────────────────────────────────────────
 const T = {
@@ -54,6 +54,7 @@ function getStatusList(){
   }catch{return [{name:"Lead",color:"#3B82F6"},{name:"Em contato",color:"#10B981"},{name:"Sem contato",color:"#64748B"}];}
 }
 const STATUS_OPTIONS=getStatusList().map(s=>s.name);
+function getStatusNames(){return getStatusList().map(s=>s.name);}
 function getStatusColor(name){const f=getStatusList().find(s=>s.name===name);return f?.color||T.accent;}
 const STATUS_COLORS=Object.fromEntries(getStatusList().map(s=>[s.name,s.color]));
 const CALL_TYPES=["Atendida","Não atendida","Caixa Postal"];
@@ -63,6 +64,18 @@ const WHATS_TYPES=["Enviado","Recebido"];
 const MEETING_STATUS=["Agendada","Realizada","Cancelada","Reagendada"];
 
 const today=()=>new Date().toISOString().slice(0,10);
+const toUpper=(s)=>(s||"").toUpperCase();
+function getChannels(){
+  try{const c=localStorage.getItem("krcf_channels");
+    return c?JSON.parse(c):[
+      {name:"Ligação",code:"LIGACAO",icon:"📞",color:"#3B82F6"},
+      {name:"WhatsApp",code:"WHATSAPP",icon:"💬",color:"#10B981"}
+    ];
+  }catch{return [
+    {name:"Ligação",code:"LIGACAO",icon:"📞",color:"#3B82F6"},
+    {name:"WhatsApp",code:"WHATSAPP",icon:"💬",color:"#10B981"}
+  ];}
+}
 function maskCNPJ(v){
   const n=v.replace(/[^\d]/g,"").slice(0,14);
   if(n.length<=11){
@@ -740,7 +753,7 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
         <input style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,flex:1,minWidth:150,fontFamily:"inherit"}} placeholder="🔍 Buscar..." value={search} onChange={e=>setSearch(e.target.value)}/>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fStatus} onChange={e=>setFStatus(e.target.value)}>
-          <option value="">Status</option>{getStatuses().map(s=><option key={s}>{s}</option>)}
+          <option value="">Status</option>{getStatusList().map(s=><option key={s}>{s}</option>)}
         </select>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fSeg} onChange={e=>setFSeg(e.target.value)}>
           <option value="">Segmento</option>{segments.map(s=><option key={s}>{s}</option>)}
@@ -814,7 +827,7 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
           <Input label="Estado" value={form.state} onChange={v=>setForm(f=>({...f,state:v}))}/>
           <Input label="Segmento" value={form.segment} onChange={v=>setForm(f=>({...f,segment:v}))} options={segments}/>
           <Input label="Origem" value={form.origin} onChange={v=>setForm(f=>({...f,origin:v}))} options={origins}/>
-          <Input label="Status" value={form.status} onChange={v=>setForm(f=>({...f,status:v}))} options={getStatuses()}/>
+          <Input label="Status" value={form.status} onChange={v=>setForm(f=>({...f,status:v}))} options={getStatusList()}/>
           {user.role!=="vendedor"&&<div style={{marginBottom:14}}><div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>Responsável</div>
             <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,width:"100%"}} value={form.responsible} onChange={e=>setForm(f=>({...f,responsible:e.target.value}))}>
               <option value="">Selecione...</option>{profiles.filter(p=>p.role==="vendedor").map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
@@ -1687,110 +1700,6 @@ function EditableList({title,table,color,icon}){
       </div>
       <div style={{color:T.muted,fontSize:11,marginTop:8}}>💡 As alterações refletem para todos os usuários imediatamente</div>
     </Card>
-  );
-}
-
-
-// ─── STATUS EDITOR ───────────────────────────────────────────
-const STATUS_PALETTE = [
-  T.accent, T.green, T.muted, T.purple, T.yellow, T.red,
-  "#EC4899","#14B8A6","#F97316","#6366F1","#84CC16","#06B6D4"
-];
-
-function StatusEditor() {
-  const [statuses, setStatuses] = useState(() => {
-    try {
-      const s = localStorage.getItem("krcf_statuses");
-      return s ? JSON.parse(s) : ["Lead","Em contato","Sem contato","Whats","Caixa Postal","Telefone não existe"];
-    } catch { return ["Lead","Em contato","Sem contato","Whats","Caixa Postal","Telefone não existe"]; }
-  });
-  const [newName, setNewName] = useState("");
-  const [editIdx, setEditIdx] = useState(null);
-  const [editVal, setEditVal] = useState("");
-
-  function persist(list) {
-    setStatuses(list);
-    localStorage.setItem("krcf_statuses", JSON.stringify(list));
-  }
-
-  function add() {
-    const v = newName.trim();
-    if (!v) return;
-    if (statuses.includes(v)) return alert("Status já existe!");
-    persist([...statuses, v]);
-    setNewName("");
-  }
-
-  function remove(idx) {
-    if (!confirm(`Remover status "${statuses[idx]}"?
-Os clientes com este status manterão o valor, mas ele não aparecerá mais como opção.`)) return;
-    persist(statuses.filter((_, i) => i !== idx));
-  }
-
-  function startEdit(idx) { setEditIdx(idx); setEditVal(statuses[idx]); }
-
-  function saveEdit() {
-    const v = editVal.trim();
-    if (!v) return;
-    const updated = statuses.map((s, i) => i === editIdx ? v : s);
-    persist(updated);
-    setEditIdx(null);
-  }
-
-  const colorFor = (s) => {
-    const map = {"Lead":T.accent,"Em contato":T.green,"Sem contato":T.muted,"Whats":T.purple,"Caixa Postal":T.yellow,"Telefone não existe":T.red};
-    return map[s] || T.accent;
-  };
-
-  return (
-    <div>
-      <Card style={{ marginBottom: 16, background: T.accent + "0A", border: `1px solid ${T.accent}20` }}>
-        <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.7 }}>
-          💡 <strong style={{ color: T.text }}>Como funciona:</strong> Os status definidos aqui aparecerão nos formulários de clientes e nos filtros. 
-          Você pode adicionar novos status personalizados (ex: "Negociando", "Proposta enviada") e excluir os que não usa.
-        </div>
-      </Card>
-      <Card>
-        <div style={{ fontSize: 13, fontWeight: 700, color: T.sub, marginBottom: 16 }}>🏷 Status de Clientes</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 20 }}>
-          {statuses.map((s, idx) => (
-            <div key={idx} style={{ display: "flex", alignItems: "center", gap: 10, background: T.surface, borderRadius: 8, padding: "10px 14px", border: `1px solid ${T.border}` }}>
-              {editIdx === idx ? (
-                <>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: colorFor(editVal || s), flexShrink: 0 }} />
-                  <input autoFocus
-                    style={{ flex: 1, background: "transparent", border: "none", color: T.text, fontSize: 13, fontFamily: "inherit", outline: "none" }}
-                    value={editVal} onChange={e => setEditVal(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") saveEdit(); if (e.key === "Escape") setEditIdx(null); }} />
-                  <button onClick={saveEdit} style={{ background: T.green, border: "none", borderRadius: 6, color: "#fff", padding: "4px 12px", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>✓ Salvar</button>
-                  <button onClick={() => setEditIdx(null)} style={{ background: "none", border: "none", color: T.muted, fontSize: 18, cursor: "pointer" }}>×</button>
-                </>
-              ) : (
-                <>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", background: colorFor(s), flexShrink: 0 }} />
-                  <span style={{ flex: 1, color: T.text, fontSize: 13 }}>{s}</span>
-                  <span style={{ background: colorFor(s) + "22", color: colorFor(s), borderRadius: 6, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{s}</span>
-                  <button onClick={() => startEdit(idx)} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 15, padding: "2px 6px" }}>✏️</button>
-                  <button onClick={() => remove(idx)} style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: 15, padding: "2px 6px" }}>🗑</button>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-        <div style={{ display: "flex", gap: 10 }}>
-          <input
-            style={{ flex: 1, background: T.surface, border: `1px solid ${T.purple}40`, borderRadius: 8, color: T.text, padding: "9px 14px", fontSize: 13, fontFamily: "inherit", outline: "none" }}
-            placeholder="+ Novo status... (ex: Negociando, Proposta enviada)"
-            value={newName} onChange={e => setNewName(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && add()} />
-          <button onClick={add} disabled={!newName.trim()}
-            style={{ background: T.purple, border: "none", borderRadius: 8, color: "#fff", padding: "9px 20px", fontSize: 13, fontWeight: 600, cursor: newName.trim() ? "pointer" : "not-allowed", opacity: newName.trim() ? 1 : 0.5, fontFamily: "inherit" }}>
-            Adicionar
-          </button>
-        </div>
-        <div style={{ color: T.muted, fontSize: 11, marginTop: 8 }}>💡 Pressione Enter para adicionar rapidamente</div>
-      </Card>
-    </div>
   );
 }
 
