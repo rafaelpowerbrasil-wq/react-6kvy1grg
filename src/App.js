@@ -11,9 +11,10 @@ const SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// 2. ANTHROPIC (IA) — obtenha em console.anthropic.com > API Keys
-// Cole sua chave abaixo entre as aspas:
-const ANTHROPIC_KEY = ""; // ex: sk-ant-api03-xxxxx
+// ─────────────────────────────────────────────────────────────
+// 2. ANTHROPIC IA — Cole SUA CHAVE entre as aspas na linha abaixo:
+const ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
+// ─────────────────────────────────────────────────────────────
 
 // ─── THEME ───────────────────────────────────────────────────
 const T = {
@@ -230,66 +231,61 @@ function Dashboard({user,profiles,onNav}){
   const[dashActs,setDashActs]=useState(new Set());
   useEffect(()=>{
     async function load(){
-      const[c,cl,f,g,camp,dcl,ca,wh,fu,mt]=await Promise.all([
-        supabase.from("calls").select("*"),
+      const[ac,cl,f,g,camp]=await Promise.all([
+        supabase.from("acionamentos").select("*"),
         supabase.from("clients").select("*"),
         supabase.from("followups").select("*"),
         supabase.from("goals").select("*"),
         supabase.from("campaigns").select("*"),
-        supabase.from("clients").select("id,responsible"),
-        supabase.from("calls").select("client_id"),
-        supabase.from("whatsapp_logs").select("client_id"),
-        supabase.from("followups").select("client_id"),
-        supabase.from("meetings").select("client_id"),
       ]);
-      setCalls(c.data||[]);
+      setCalls(ac.data||[]);   // reusing 'calls' state for acionamentos
       setClients(cl.data||[]);
       setFollowups(f.data||[]);
       setGoals(g.data||[]);
       setDashCampaigns(camp.data||[]);
-      setDashClients(dcl.data||[]);
-      const ids=new Set([...(ca.data||[]),...(wh.data||[]),...(fu.data||[]),...(mt.data||[])].map(a=>a.client_id));
+      // Build client sets
+      const allAc = ac.data||[];
+      const ids=new Set(allAc.map(a=>a.client_id));
       setDashActs(ids);
       setLoading(false);
     }
     load();
   },[]);
   // ── COMPUTED VALUES (after hooks) ──
-  // Both vendedor and admin use same logic - vendedor just sees filtered data
-  const allCalls=user.role==="vendedor"?calls.filter(c=>c.user_id===user.id):calls;
-  const myCalls=dateMode==="specific"
-    ?allCalls.filter(c=>c.date===specificDate)
-    :allCalls.filter(c=>c.date?.startsWith(dashMonth));
-  // vendedor sees own clients, admin sees all
-  const allCallsUnfiltered=calls; // for team goals
+  // calls = acionamentos data (reusing state name)
+  const allAc=user.role==="vendedor"?calls.filter(a=>a.user_id===user.id):calls;
+  const filteredAc=dateMode==="specific"
+    ?allAc.filter(a=>a.date===specificDate)
+    :allAc.filter(a=>a.date?.startsWith(dashMonth));
   const myClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
   const myFU=user.role==="vendedor"?followups.filter(f=>f.user_id===user.id):followups;
   const pendFU=myFU.filter(f=>f.status==="Pendente"&&f.date<=today());
-  const effective=myCalls.filter(c=>c.type==="Atendida").length;
-  const convRate=myCalls.length>0?Math.round((effective/myCalls.length)*100):0;
-  const visibleClients=user.role==="vendedor"?dashClients.filter(c=>c.responsible===user.id):dashClients;
-  // acionados: clientes que tiveram atividade no mês/dia selecionado
-  const monthActIds=new Set(allCalls.filter(c=>c.date?.startsWith(dashMonth)).map(c=>c.client_id));
+  // Unique acionamentos per client/day/canal
+  const ligKeys=new Set(filteredAc.filter(a=>a.canal==="LIGACAO").map(a=>`${a.client_id}_${a.date}`));
+  const whaKeys=new Set(filteredAc.filter(a=>a.canal==="WHATSAPP").map(a=>`${a.client_id}_${a.date}`));
+  const totalAcKeys=new Set(filteredAc.map(a=>`${a.client_id}_${a.date}`));
+  const convRate=filteredAc.length>0?Math.round((filteredAc.filter(a=>a.result==="Interesse").length/filteredAc.length)*100):0;
+  const visibleClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
+  const monthActIds=new Set(allAc.filter(a=>a.date?.startsWith(dashMonth)).map(a=>a.client_id));
   const acionadosCount=visibleClients.filter(c=>monthActIds.has(c.id)).length;
   const semAcionamento=visibleClients.length-acionadosCount;
-  const acionados=myClients.filter(c=>c.status!=="Lead").length;
+  const myCalls=filteredAc; // alias for volumetria compat
   if(loading)return<Spinner/>;
   const now=new Date();
-  let volData=[];
-  const volCalls = dateMode==="specific"
-    ? allCalls.filter(c=>c.date===specificDate)
-    : allCalls.filter(c=>c.date?.startsWith(dashMonth));
+  const targetDay=dateMode==="specific"?specificDate:today();
+  let volLig=[],volWha=[];
   if(volFilter==="day"){
-    const targetDay = dateMode==="specific"?specificDate:today();
-    volData=Array.from({length:24},(_,i)=>({name:`${i}h`,Ligações:allCalls.filter(c=>c.date===targetDay&&parseInt((c.time||"00").split(":")[0])===i).length})).slice(0,now.getHours()+2);
+    volLig=Array.from({length:now.getHours()+2},(_,i)=>({name:`${i}h`,value:allAc.filter(a=>a.date===targetDay&&a.canal==="LIGACAO"&&parseInt((a.time||"00").split(":")[0])===i).length}));
+    volWha=Array.from({length:now.getHours()+2},(_,i)=>({name:`${i}h`,value:allAc.filter(a=>a.date===targetDay&&a.canal==="WHATSAPP"&&parseInt((a.time||"00").split(":")[0])===i).length}));
   }else if(volFilter==="week"){
-    volData=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-d.getDay()+i);const k=d.toISOString().slice(0,10);return{name:d.toLocaleDateString("pt-BR",{weekday:"short"}),Ligações:allCalls.filter(c=>c.date===k).length};});
+    volLig=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-d.getDay()+i);const k=d.toISOString().slice(0,10);return{name:d.toLocaleDateString("pt-BR",{weekday:"short"}),value:allAc.filter(a=>a.date===k&&a.canal==="LIGACAO").length};});
+    volWha=Array.from({length:7},(_,i)=>{const d=new Date();d.setDate(d.getDate()-d.getDay()+i);const k=d.toISOString().slice(0,10);return{name:d.toLocaleDateString("pt-BR",{weekday:"short"}),value:allAc.filter(a=>a.date===k&&a.canal==="WHATSAPP").length};});
   }else{
-    const [yr,mo]=dashMonth.split("-");
-    const dim=new Date(parseInt(yr),parseInt(mo),0).getDate();
-    volData=Array.from({length:dim},(_,i)=>{const k=`${dashMonth}-${String(i+1).padStart(2,"0")}`;return{name:String(i+1),Ligações:allCalls.filter(c=>c.date===k).length};});
+    const [yr,mo]=dashMonth.split("-");const dim=new Date(parseInt(yr),parseInt(mo),0).getDate();
+    volLig=Array.from({length:dim},(_,i)=>{const k=`${dashMonth}-${String(i+1).padStart(2,"0")}`;return{name:String(i+1),value:allAc.filter(a=>a.date===k&&a.canal==="LIGACAO").length};});
+    volWha=Array.from({length:dim},(_,i)=>{const k=`${dashMonth}-${String(i+1).padStart(2,"0")}`;return{name:String(i+1),value:allAc.filter(a=>a.date===k&&a.canal==="WHATSAPP").length};});
   }
-  const originsData=allOrigins.map(o=>({name:o,value:myCalls.filter(c=>clients.find(cl=>cl.id===c.client_id)?.origin===o).length})).filter(d=>d.value>0);
+    const originsData=[];
   const period=dashMonth;
   const sellers=profiles.filter(p=>p.role==="vendedor");
   const[ws,we]=weekRange();
@@ -298,9 +294,10 @@ function Dashboard({user,profiles,onNav}){
     ? goals.filter(g=>g.user_id===user.id&&g.period===period)
     : sellers.map(s=>goals.find(g=>g.user_id===s.id&&g.period===period)).filter(Boolean);
   // For vendedor: filter calls only by own; for admin: team total  
+  const [ws,we]=weekRange();
   const filterCallsForGoal = user.role==="vendedor"
-    ? (goalFilter==="day"?myCalls.filter(c=>c.date===today()):goalFilter==="week"?myCalls.filter(c=>{const[ws2,we2]=weekRange();return c.date>=ws2&&c.date<=we2;}):myCalls)
-    : (goalFilter==="day"?allCalls.filter(c=>c.date===today()):goalFilter==="week"?allCalls.filter(c=>{const[ws2,we2]=weekRange();return c.date>=ws2&&c.date<=we2;}):allCalls.filter(c=>c.date?.startsWith(dashMonth)));
+    ? (goalFilter==="day"?allAc.filter(a=>a.date===today()):goalFilter==="week"?allAc.filter(a=>a.date>=ws&&a.date<=we):allAc)
+    : (goalFilter==="day"?allAc.filter(a=>a.date===today()):goalFilter==="week"?allAc.filter(a=>a.date>=ws&&a.date<=we):allAc.filter(a=>a.date?.startsWith(dashMonth)));
   const totalMeta={
     prosp:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.prosp_day:goalFilter==="week"?g.prosp_week:g.prosp_month),0),
     base:relevantGoals.reduce((a,g)=>a+(goalFilter==="day"?g.base_day:goalFilter==="week"?g.base_week:g.base_month),0),
@@ -310,26 +307,18 @@ function Dashboard({user,profiles,onNav}){
   const FB=[["day","Dia"],["week","Semana"],["month","Mês"]];
   return(
     <div>
-      <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:24}}>
-        <StatCard label="Total de Ligações" value={myCalls.length} icon="📞"/>
-        <StatCard label="Contatos Efetivos" value={effective} color={T.green} icon="✅"/>
-        <StatCard label="Taxa de Contatos Efetivos" value={`${convRate}%`} color={T.purple} icon="🎯"/>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+        <StatCard label="Total Acionamentos" value={totalAcKeys.size} icon="🎯"/>
+        <StatCard label="Acionados por Ligação" value={ligKeys.size} color={T.accent} icon="📞"/>
+        <StatCard label="Acionados por WhatsApp" value={whaKeys.size} color={T.green} icon="💬"/>
+        <StatCard label="Taxa de Conversão" value={`${convRate}%`} color={T.purple} icon="📈"/>
         <StatCard label="Follow-ups Pendentes" value={pendFU.length} color={pendFU.length>0?T.yellow:T.green} icon="⏰"/>
-        <StatCard label="Clientes Acionados" value={acionados} color={T.accent} icon="👥"/>
+        <StatCard label="Total Clientes" value={visibleClients.length} color={T.muted} icon="👥"/>
       </div>
-      <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:20}}>
-        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
-          <div style={{fontSize:26,fontWeight:800,color:T.accent}}>{visibleClients.length}</div>
-          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Total de Clientes</div>
-        </Card>
-        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
-          <div style={{fontSize:26,fontWeight:800,color:T.green}}>{acionadosCount}</div>
-          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Clientes Acionados</div>
-        </Card>
-        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
-          <div style={{fontSize:26,fontWeight:800,color:semAcionamento>0?T.red:T.muted}}>{semAcionamento}</div>
-          <div style={{fontSize:11,color:T.muted,marginTop:4}}>Sem Acionamento</div>
-        </Card>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+        <Card style={{flex:1,minWidth:120,textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:T.accent}}>{visibleClients.length}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>Total Clientes</div></Card>
+        <Card style={{flex:1,minWidth:120,textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:T.green}}>{acionadosCount}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>Acionados (mês)</div></Card>
+        <Card style={{flex:1,minWidth:120,textAlign:"center",border:`1px solid ${T.yellow}30`}}><div style={{fontSize:22,fontWeight:800,color:T.yellow}}>{semAcionamento}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>Sem Acionamento</div></Card>
       </div>
       <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <div style={{fontSize:13,fontWeight:700,color:T.sub}}>🎯 Meta de Equipe</div>
@@ -365,35 +354,37 @@ function Dashboard({user,profiles,onNav}){
           </Card>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:20,marginBottom:24}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:20}}>
         <Card>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-            <div style={{fontSize:13,fontWeight:700,color:T.sub}}>📈 Volumetria de Ligações</div>
-            <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
-              {dateMode==="month"
-                ?<input type="month" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"5px 10px",fontSize:11,fontFamily:"inherit"}} value={dashMonth} onChange={e=>setDashMonth(e.target.value)}/>
-                :<input type="date" style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"5px 10px",fontSize:11,fontFamily:"inherit"}} value={specificDate} onChange={e=>setSpecificDate(e.target.value)}/>}
-              {FB.map(([k,v])=><Btn key={k} size="sm" variant={volFilter===k?"primary":"ghost"} onClick={()=>setVolFilter(k)}>{v}</Btn>)}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontSize:13,fontWeight:700,color:T.accent}}>📞 Volumetria — Ligações</div>
+            <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
+              {["day","week","month"].map((k,i)=><Btn key={k} size="sm" variant={volFilter===k?"primary":"ghost"} onClick={()=>setVolFilter(k)}>{["Dia","Semana","Mês"][i]}</Btn>)}
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={volData} margin={{top:20,right:10,left:-20,bottom:0}}>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={volLig} margin={{top:18,right:5,left:-22,bottom:0}}>
               <CartesianGrid strokeDasharray="3 3" stroke={T.border}/>
-              <XAxis dataKey="name" tick={{fill:T.muted,fontSize:10}}/>
-              <YAxis tick={{fill:T.muted,fontSize:10}}/>
+              <XAxis dataKey="name" tick={{fill:T.muted,fontSize:9}}/>
+              <YAxis tick={{fill:T.muted,fontSize:9}}/>
               <Tooltip contentStyle={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:12}}/>
-              <Bar dataKey="Ligações" fill={T.accent} radius={[4,4,0,0]} label={{position:"top",fill:T.sub,fontSize:10}}/>
+              <Bar dataKey="value" name="Ligações" fill={T.accent} radius={[3,3,0,0]} label={{position:"top",fill:T.sub,fontSize:9}}/>
             </BarChart>
           </ResponsiveContainer>
         </Card>
         <Card>
-          <div style={{fontSize:13,fontWeight:700,color:T.sub,marginBottom:12}}>🌐 Origem dos Contatos</div>
-          {originsData.length===0?<div style={{color:T.muted,fontSize:13,textAlign:"center",padding:32}}>Sem dados</div>
-          :<ResponsiveContainer width="100%" height={200}>
-            <PieChart><Pie data={originsData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value">
-              {originsData.map((_,i)=><Cell key={i} fill={[T.accent,T.green,T.purple,T.yellow,T.red,T.sub][i%6]}/>)}
-            </Pie><Tooltip contentStyle={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:12}}/><Legend iconType="circle" wrapperStyle={{fontSize:10,color:T.sub}}/></PieChart>
-          </ResponsiveContainer>}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div style={{fontSize:13,fontWeight:700,color:T.green}}>💬 Volumetria — WhatsApp</div>
+          </div>
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={volWha} margin={{top:18,right:5,left:-22,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={T.border}/>
+              <XAxis dataKey="name" tick={{fill:T.muted,fontSize:9}}/>
+              <YAxis tick={{fill:T.muted,fontSize:9}}/>
+              <Tooltip contentStyle={{background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:12}}/>
+              <Bar dataKey="value" name="WhatsApp" fill={T.green} radius={[3,3,0,0]} label={{position:"top",fill:T.sub,fontSize:9}}/>
+            </BarChart>
+          </ResponsiveContainer>
         </Card>
       </div>
       {pendFU.length>0&&(
@@ -664,26 +655,25 @@ function ClientHistory({client,profiles,onClose}){
   );
 }
 
-function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
+function Clients({user,profiles,onQuickAc,onQuickFU}){
   const{segments,origins}=useLists();
   const[clients,setClients]=useState([]);const[loading,setLoading]=useState(true);
   const[modal,setModal]=useState(false);const[edit,setEdit]=useState(null);
   const[historyClient,setHistoryClient]=useState(null);
   const[clientDocFile,setClientDocFile]=useState(null);
   const[clientDocs,setClientDocs]=useState(()=>{try{const s=localStorage.getItem("krcf_client_docs");return s?JSON.parse(s):{};}catch{return{};}});
-  const[allCalls,setAllCalls]=useState([]);const[allWhats,setAllWhats]=useState([]);const[allFUs,setAllFUs]=useState([]);const[allMeetings,setAllMeetings]=useState([]);
+  const[allCalls,setAllCalls]=useState([]);const[allFUs,setAllFUs]=useState([]);const[allMeetings,setAllMeetings]=useState([]);
   const[search,setSearch]=useState("");const[fStatus,setFStatus]=useState("");const[fSeg,setFSeg]=useState("");const[fOrigin,setFOrigin]=useState("");const[fResp,setFResp]=useState("");
   const emptyForm={name:"",cnpj:"",phone:"",whatsapp:"",email:"",city:"",state:"",segment:"",origin:"",responsible:user.role==="vendedor"?user.id:"",status:"Lead"};
   const[form,setForm]=useState(emptyForm);
   const load=useCallback(async()=>{
-    const[{data:cl},{data:ca},{data:wh},{data:fu},{data:mt}]=await Promise.all([
+    const[{data:cl},{data:ca},{data:fu},{data:mt}]=await Promise.all([
       supabase.from("clients").select("*").order("created_at",{ascending:false}),
-      supabase.from("calls").select("client_id,date").order("date",{ascending:false}),
-      supabase.from("whatsapp_logs").select("client_id,date").order("date",{ascending:false}),
+      supabase.from("acionamentos").select("client_id,date,canal").order("date",{ascending:false}),
       supabase.from("followups").select("client_id,date").order("date",{ascending:false}),
       supabase.from("meetings").select("client_id,date").order("date",{ascending:false}),
     ]);
-    setClients(cl||[]);setAllCalls(ca||[]);setAllWhats(wh||[]);setAllFUs(fu||[]);setAllMeetings(mt||[]);setLoading(false);
+    setClients(cl||[]);setAllCalls(ca||[]);setAllFUs(fu||[]);setAllMeetings(mt||[]);setLoading(false);
   },[]);
   useEffect(()=>{load();},[load]);
   const visible=clients.filter(c=>{
@@ -720,7 +710,6 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
   const getLastActivity=(cid)=>{
     const dates=[
       ...(allCalls.filter(a=>a.client_id===cid).map(a=>a.date)),
-      ...(allWhats.filter(a=>a.client_id===cid).map(a=>a.date)),
       ...(allFUs.filter(a=>a.client_id===cid).map(a=>a.date)),
       ...(allMeetings.filter(a=>a.client_id===cid).map(a=>a.date)),
     ].filter(Boolean).sort().reverse();
@@ -798,9 +787,9 @@ function Clients({user,profiles,onQuickCall,onQuickWhats,onQuickFU}){
                 <td style={{padding:"9px 10px",textAlign:"center"}}>{(()=>{const last=getLastActivity(c.id);const days=getDaysSince(last);return<span style={{color:days>30?T.red:days>7?T.yellow:T.green,fontWeight:700,fontSize:11}}>{last?days+"d":"—"}</span>;})()}</td>
                 <td style={{padding:"10px 12px"}}>
                   <div style={{display:"flex",gap:4}}>
-                    <Btn size="sm" variant="ghost" title="Registrar Ligação" onClick={()=>onQuickCall(c)} style={{padding:"4px 8px",fontSize:13}}>📞</Btn>
-                    <Btn size="sm" variant="ghost" title="Registrar WhatsApp" onClick={()=>onQuickWhats(c)} style={{padding:"4px 8px",fontSize:13}}>💬</Btn>
-                    <Btn size="sm" variant="ghost" title="Agendar Follow-up" onClick={()=>onQuickFU(c)} style={{padding:"4px 8px",fontSize:13}}>⏰</Btn>
+                    <button onClick={()=>onQuickAc(c,"LIGACAO")} title="Ligação" style={{background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 7px",cursor:"pointer",fontSize:13}}>📞</button>
+                    <button onClick={()=>onQuickAc(c,"WHATSAPP")} title="WhatsApp" style={{background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 7px",cursor:"pointer",fontSize:13}}>💬</button>
+                    <button onClick={()=>onQuickFU(c)} title="Follow-up" style={{background:"none",border:`1px solid ${T.border}`,borderRadius:6,padding:"3px 7px",cursor:"pointer",fontSize:13}}>⏰</button>
                   </div>
                 </td>
                 <td style={{padding:"10px 12px",color:T.sub,fontSize:12}}>{profiles.find(p=>p.id===c.responsible)?.name||"—"}</td>
@@ -1499,7 +1488,7 @@ function Goals({user,profiles}){
   const load=useCallback(async()=>{
     const[g,c,camp]=await Promise.all([
       supabase.from("goals").select("*"),
-      supabase.from("calls").select("date,user_id"),
+      supabase.from("acionamentos").select("date,user_id,canal"),
       supabase.from("campaigns").select("*").order("created_at")
     ]);
     setGoals(g.data||[]);setCalls(c.data||[]);setCampaigns(camp.data||[]);setLoading(false);
@@ -1828,16 +1817,11 @@ function Settings({user,profiles,loadProfiles}){
     if(resetConfirm!=="RESETAR")return alert("Digite RESETAR para confirmar.");
     if(!confirm("ATENÇÃO: Esta ação apagará TODOS os dados do sistema (clientes, ligações, metas, etc). Deseja continuar?"))return;
     const UUID0="00000000-0000-0000-0000-000000000000";
-    await Promise.all([
-      supabase.from("acionamentos").delete().neq("id",UUID0),
-      supabase.from("calls").delete().neq("id",UUID0),
-      supabase.from("whatsapp_logs").delete().neq("id",UUID0),
-      supabase.from("followups").delete().neq("id",UUID0),
-      supabase.from("meetings").delete().neq("id",UUID0),
-      supabase.from("goals").delete().neq("id",UUID0),
-      supabase.from("campaigns").delete().neq("id",UUID0),
-      supabase.from("clients").delete().neq("id",UUID0),
-    ]);
+    const tables=["acionamentos","calls","whatsapp_logs","followups","meetings","goals","campaigns","clients"];
+    for(const t of tables){
+      const {error:e}=await supabase.from(t).delete().neq("id",UUID0);
+      if(e) console.warn(`Reset ${t}:`,e.message);
+    }
     alert("Sistema resetado com sucesso!");
     setResetModal(false);setResetConfirm("");
     window.location.reload();
@@ -2284,11 +2268,12 @@ function Reports({ user, profiles }) {
   async function generateReport() {
     setLoading(true); setReport(""); setSentMsg("");
     try {
-      const [{ data: meetings }, { data: calls }, { data: clients }] = await Promise.all([
+      const [{ data: meetings }, { data: acionamentos }, { data: clients }] = await Promise.all([
         supabase.from("meetings").select("*").gte("date",reportMonth+"-01").lte("date",reportMonth+"-31"),
-        supabase.from("calls").select("*").gte("date",reportMonth+"-01").lte("date",reportMonth+"-31"),
+        supabase.from("acionamentos").select("*").gte("date",reportMonth+"-01").lte("date",reportMonth+"-31"),
         supabase.from("clients").select("*"),
       ]);
+      const calls = acionamentos; // alias for prompt compatibility
 
       let prompt = "";
       if (reportType === "lost_reasons") {
