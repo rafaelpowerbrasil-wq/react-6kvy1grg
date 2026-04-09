@@ -272,10 +272,21 @@ function Dashboard({user,profiles,onNav}){
   const myFU=user.role==="vendedor"?followups.filter(f=>f.user_id===user.id):followups;
   const pendFU=myFU.filter(f=>f.status==="Pendente"&&f.date<=today());
   // Unique acionamentos per client/day/canal
+  // 1 acionamento por CNPJ por dia por canal
   const ligKeys=new Set(filteredAc.filter(a=>a.canal==="LIGACAO").map(a=>`${a.client_id}_${a.date}`));
   const whaKeys=new Set(filteredAc.filter(a=>a.canal==="WHATSAPP").map(a=>`${a.client_id}_${a.date}`));
   const totalAcKeys=new Set(filteredAc.map(a=>`${a.client_id}_${a.date}`));
   const convRate=filteredAc.length>0?Math.round((filteredAc.filter(a=>a.result==="Interesse").length/filteredAc.length)*100):0;
+  // Status-based counting - find clients and their status
+  const clientMap=Object.fromEntries(clients.map(c=>[c.id,c]));
+  const baseClientIds=new Set(clients.filter(c=>c.status==="Cliente da Base").map(c=>c.id));
+  const prospClientIds=new Set(clients.filter(c=>c.status==="Prospecção").map(c=>c.id));
+  // Unique acionamentos per CNPJ per day for each status group
+  const baseAcKeys=new Set(filteredAc.filter(a=>baseClientIds.has(a.client_id)).map(a=>`${a.client_id}_${a.date}`));
+  const prospAcKeys=new Set(filteredAc.filter(a=>prospClientIds.has(a.client_id)).map(a=>`${a.client_id}_${a.date}`));
+  // Clients never contacted (no acionamentos ever)
+  const everContactedIds=new Set(allAc.map(a=>a.client_id));
+  const neverContacted=visibleClients.filter(c=>!everContactedIds.has(c.id)).length;
   const visibleClients=user.role==="vendedor"?clients.filter(c=>c.responsible===user.id):clients;
   const monthActIds=new Set(allAc.filter(a=>a.date?.startsWith(dashMonth)).map(a=>a.client_id));
   const acionadosCount=visibleClients.filter(c=>monthActIds.has(c.id)).length;
@@ -319,11 +330,55 @@ function Dashboard({user,profiles,onNav}){
     <div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
         <StatCard label="Total Acionamentos" value={totalAcKeys.size} icon="🎯"/>
-        <StatCard label="Acionados por Ligação" value={ligKeys.size} color={T.accent} icon="📞"/>
-        <StatCard label="Acionados por WhatsApp" value={whaKeys.size} color={T.green} icon="💬"/>
+        <StatCard label="📞 Ligações" value={ligKeys.size} color={T.accent} icon="📞"/>
+        <StatCard label="💬 WhatsApp" value={whaKeys.size} color={T.green} icon="💬"/>
         <StatCard label="Taxa de Conversão" value={`${convRate}%`} color={T.purple} icon="📈"/>
         <StatCard label="Follow-ups Pendentes" value={pendFU.length} color={pendFU.length>0?T.yellow:T.green} icon="⏰"/>
-        <StatCard label="Total Clientes" value={visibleClients.length} color={T.muted} icon="👥"/>
+        <StatCard label="Nunca Acionados" value={neverContacted} color={neverContacted>0?T.red:T.green} icon="⚠️" sub="sem nenhum registro"/>
+      </div>
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+        <Card style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,color:T.muted,marginBottom:6,fontWeight:600}}>🏢 Cliente da Base</div>
+          <div style={{display:"flex",gap:12,alignItems:"center"}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:800,color:T.accent}}>{baseAcKeys.size}</div>
+              <div style={{fontSize:10,color:T.muted}}>Acionados</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:800,color:T.muted}}>{baseClientIds.size}</div>
+              <div style={{fontSize:10,color:T.muted}}>Total Base</div>
+            </div>
+            <div style={{flex:1}}>
+              <ProgressBar value={baseAcKeys.size} max={Math.max(baseClientIds.size,1)} color={T.accent}/>
+              <div style={{fontSize:10,color:T.muted,marginTop:3}}>{baseClientIds.size>0?Math.round((baseAcKeys.size/baseClientIds.size)*100):0}% acionados</div>
+            </div>
+          </div>
+        </Card>
+        <Card style={{flex:1,minWidth:140}}>
+          <div style={{fontSize:11,color:T.muted,marginBottom:6,fontWeight:600}}>🎯 Prospecção</div>
+          <div style={{display:"flex",gap:12,alignItems:"center"}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:800,color:T.yellow}}>{prospAcKeys.size}</div>
+              <div style={{fontSize:10,color:T.muted}}>Acionados</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:800,color:T.muted}}>{prospClientIds.size}</div>
+              <div style={{fontSize:10,color:T.muted}}>Total Prosp.</div>
+            </div>
+            <div style={{flex:1}}>
+              <ProgressBar value={prospAcKeys.size} max={Math.max(prospClientIds.size,1)} color={T.yellow}/>
+              <div style={{fontSize:10,color:T.muted,marginTop:3}}>{prospClientIds.size>0?Math.round((prospAcKeys.size/prospClientIds.size)*100):0}% acionados</div>
+            </div>
+          </div>
+        </Card>
+        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
+          <div style={{fontSize:11,color:T.muted,marginBottom:6,fontWeight:600}}>👥 Clientes</div>
+          <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+            <div><div style={{fontSize:20,fontWeight:800,color:T.accent}}>{visibleClients.length}</div><div style={{fontSize:10,color:T.muted}}>Total</div></div>
+            <div><div style={{fontSize:20,fontWeight:800,color:T.green}}>{acionadosCount}</div><div style={{fontSize:10,color:T.muted}}>Acionados</div></div>
+            <div><div style={{fontSize:20,fontWeight:800,color:T.red}}>{neverContacted}</div><div style={{fontSize:10,color:T.muted}}>Nunca</div></div>
+          </div>
+        </Card>
       </div>
       <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
         <Card style={{flex:1,minWidth:120,textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:T.accent}}>{visibleClients.length}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>Total Clientes</div></Card>
@@ -752,6 +807,7 @@ function Clients({user,profiles,onQuickAc,onQuickFU}){
   const acionadosCount=visibleAll.filter(c=>getDaysSince(getLastActivity(c.id))<30).length;
   const sem30=visibleAll.filter(c=>{const d=getDaysSince(getLastActivity(c.id));return d>=30&&d<60;}).length;
   const sem60=visibleAll.filter(c=>getDaysSince(getLastActivity(c.id))>=60).length;
+  const neverAc=visibleAll.filter(c=>getLastActivity(c.id)===null).length;
   return(
     <div>
       <div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
@@ -2047,30 +2103,42 @@ function AIKeyEditor() {
   }
 
   async function testKey() {
-    setTesting(true); setTestResult("");
+    const trimmed = key.trim();
+    if (!trimmed) { setTestResult("❌ Cole a chave antes de testar."); return; }
+    setTesting(true); setTestResult("🔄 Testando conexão com Anthropic...");
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": key.trim(),
+          "x-api-key": trimmed,
           "anthropic-version": "2023-06-01",
           "anthropic-dangerous-direct-browser-access": "true"
         },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 10,
-          messages: [{ role: "user", content: "Responda apenas: OK" }]
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 5,
+          messages: [{ role: "user", content: "OK" }]
         })
       });
+      const data = await r.json();
       if (r.ok) {
-        setTestResult("✅ Chave válida! IA funcionando.");
+        setTestResult("✅ IA funcionando! Chave válida.");
+        // Auto-save on success
+        localStorage.setItem("krcf_anthropic_key", trimmed);
+        setSaved(true); setTimeout(() => setSaved(false), 3000);
       } else {
-        const e = await r.json();
-        setTestResult("❌ Erro: " + (e.error?.message || r.status));
+        const msg = data.error?.message || "Erro " + r.status;
+        if (r.status === 401) {
+          setTestResult("❌ Chave inválida ou expirada. Gere uma nova em console.anthropic.com");
+        } else if (r.status === 403) {
+          setTestResult("❌ Sem permissão. Verifique se a chave tem acesso à API.");
+        } else {
+          setTestResult("❌ Erro: " + msg);
+        }
       }
     } catch (e) {
-      setTestResult("❌ " + e.message);
+      setTestResult("❌ Erro de rede: " + e.message);
     }
     setTesting(false);
   }
