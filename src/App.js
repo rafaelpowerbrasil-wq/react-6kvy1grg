@@ -17,12 +17,23 @@ const ANTHROPIC_KEY = "COLE_SUA_CHAVE_AQUI"; // ex: sk-ant-api03-...
 // ─────────────────────────────────────────────────────────────
 
 // ─── THEME ───────────────────────────────────────────────────
-const T = {
+const DEFAULT_T = {
   bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
   accent:"#3B82F6",accentGlow:"#3B82F620",green:"#10B981",red:"#EF4444",
   yellow:"#F59E0B",orange:"#F59E0B",purple:"#8B5CF6",
   text:"#F1F5F9",muted:"#64748B",sub:"#94A3B8",
 };
+function loadTheme() {
+  try {
+    const saved = localStorage.getItem("krcf_theme");
+    if (saved) {
+      const t = JSON.parse(saved);
+      return { ...DEFAULT_T, ...t, accentGlow: (t.accent||DEFAULT_T.accent)+"20", orange: t.yellow||DEFAULT_T.yellow };
+    }
+  } catch(e) {}
+  return { ...DEFAULT_T };
+}
+const T = loadTheme();
 
 // ─── GLOBAL LISTS CONTEXT ────────────────────────────────────
 const ListsContext = React.createContext({ segments:[], origins:[], reload:()=>{} });
@@ -682,10 +693,33 @@ function Clients({user,profiles,onQuickAc,onQuickFU}){
     return mine&&respMatch&&(!q||c.name.toLowerCase().includes(q)||(c.cnpj||"").includes(q)||(c.phone||"").includes(q))&&(!fStatus||c.status===fStatus)&&(!fSeg||c.segment===fSeg)&&(!fOrigin||c.origin===fOrigin);
   });
   async function save(){
-    if(!form.name||!form.phone)return alert("Nome e telefone são obrigatórios.");
-    if(edit)await supabase.from("clients").update({...form,updated_at:new Date().toISOString()}).eq("id",edit.id);
-    else{const{error}=await supabase.from("clients").insert({...form,responsible:form.responsible||user.id});if(error?.code==="23505")return alert("CNPJ já cadastrado!");}
-    await load();setModal(false);
+    if(!form.name?.trim())return alert("Nome é obrigatório.");
+    if(!form.phone?.trim())return alert("Telefone é obrigatório.");
+    const data={
+      name:toUpper(form.name.trim()),
+      cnpj:form.cnpj?.trim()||null,
+      phone:form.phone.trim(),
+      whatsapp:form.whatsapp?.trim()||null,
+      email:form.email?.trim().toLowerCase()||null,
+      city:toUpper(form.city?.trim()||""),
+      state:toUpper(form.state?.trim()||""),
+      segment:form.segment||null,
+      origin:form.origin||null,
+      responsible:form.responsible||user.id,
+      status:form.status||"Lead",
+    };
+    if(edit){
+      const{error}=await supabase.from("clients").update({...data,updated_at:new Date().toISOString()}).eq("id",edit.id);
+      if(error){alert("Erro ao atualizar: "+error.message);return;}
+    }else{
+      const{error}=await supabase.from("clients").insert(data);
+      if(error){
+        if(error.code==="23505")alert("CNPJ já cadastrado em outro cliente!");
+        else alert("Erro ao salvar: "+error.message);
+        return;
+      }
+    }
+    await load();setModal(false);setEdit(null);
   }
   async function del(id){if(!confirm("Remover cliente?"))return;await supabase.from("clients").delete().eq("id",id);await load();}
   function exportCSV(){
@@ -741,16 +775,16 @@ function Clients({user,profiles,onQuickAc,onQuickFU}){
       <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
         <input style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:12,flex:1,minWidth:150,fontFamily:"inherit"}} placeholder="🔍 Buscar..." value={search} onChange={e=>setSearch(e.target.value)}/>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fStatus} onChange={e=>setFStatus(e.target.value)}>
-          <option value="">Status</option>{getStatusList().map(s=><option key={s.name} value={s.name}>{s.name}</option>)}
+          <option value="">📋 Todos os Status</option>{getStatusList().map(s=><option key={s.name} value={s.name}>{s.name}</option>)}
         </select>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fSeg} onChange={e=>setFSeg(e.target.value)}>
-          <option value="">Segmento</option>{segments.map(s=><option key={s}>{s}</option>)}
+          <option value="">📁 Todos os Segmentos</option>{segments.map(s=><option key={s}>{s}</option>)}
         </select>
         <select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fOrigin} onChange={e=>setFOrigin(e.target.value)}>
-          <option value="">Origem</option>{origins.map(o=><option key={o}>{o}</option>)}
+          <option value="">🌐 Todas as Origens</option>{origins.map(o=><option key={o}>{o}</option>)}
         </select>
         {user.role!=="vendedor"&&<select style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"7px 10px",fontSize:12}} value={fResp} onChange={e=>setFResp(e.target.value)}>
-          <option value="">Responsável</option>{sellers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+          <option value="">👤 Todos os Responsáveis</option>{sellers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
         </select>}
         <Btn size="sm" onClick={()=>{setEdit(null);setForm(emptyForm);setModal(true);}}>+ Novo Cliente</Btn>
         <Btn size="sm" variant="ghost" onClick={exportCSV}>⬇ Exportar</Btn>
@@ -1800,6 +1834,194 @@ function ChannelEditor(){
 
 
 
+
+// ─── THEME PRESETS ───────────────────────────────────────────
+const THEME_PRESETS = {
+  dark: {
+    label:"🌙 Escuro (padrão)",
+    bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
+    accent:"#3B82F6",green:"#10B981",red:"#EF4444",yellow:"#F59E0B",
+    purple:"#8B5CF6",text:"#F1F5F9",muted:"#64748B",sub:"#94A3B8",
+  },
+  light: {
+    label:"☀️ Claro",
+    bg:"#F1F5F9",surface:"#FFFFFF",card:"#FFFFFF",border:"#E2E8F0",
+    accent:"#2563EB",green:"#059669",red:"#DC2626",yellow:"#D97706",
+    purple:"#7C3AED",text:"#0F172A",muted:"#94A3B8",sub:"#475569",
+  },
+  ocean: {
+    label:"🌊 Oceano",
+    bg:"#0C1929",surface:"#112240",card:"#1A2F52",border:"#1E3A5F",
+    accent:"#64FFDA",green:"#00E5A0",red:"#FF5370",yellow:"#FFCC02",
+    purple:"#C792EA",text:"#CCD6F6",muted:"#8892B0",sub:"#A8B2D8",
+  },
+  sunset: {
+    label:"🌅 Pôr do Sol",
+    bg:"#1A0A00",surface:"#2D1500",card:"#3D1F00",border:"#5C3000",
+    accent:"#FF6B35",green:"#4CAF50",red:"#FF1744",yellow:"#FFD600",
+    purple:"#CE93D8",text:"#FFF3E0",muted:"#A1887F",sub:"#BCAAA4",
+  },
+  forest: {
+    label:"🌿 Floresta",
+    bg:"#0A1A0F",surface:"#0D2415",card:"#112B1A",border:"#1A4025",
+    accent:"#4CAF50",green:"#00E676",red:"#FF5252",yellow:"#FFEA00",
+    purple:"#CE93D8",text:"#E8F5E9",muted:"#81C784",sub:"#A5D6A7",
+  },
+  corporate: {
+    label:"🏢 Corporativo",
+    bg:"#F8FAFC",surface:"#F1F5F9",card:"#FFFFFF",border:"#CBD5E1",
+    accent:"#0EA5E9",green:"#22C55E",red:"#EF4444",yellow:"#F59E0B",
+    purple:"#8B5CF6",text:"#1E293B",muted:"#94A3B8",sub:"#64748B",
+  },
+};
+
+function ThemeEditor() {
+  const [activePreset, setActivePreset] = useState(() => 
+    localStorage.getItem("krcf_theme_preset") || "dark"
+  );
+  const [custom, setCustom] = useState(() => {
+    try { const c = localStorage.getItem("krcf_theme_custom"); return c ? JSON.parse(c) : THEME_PRESETS.dark; }
+    catch { return THEME_PRESETS.dark; }
+  });
+  const [tab, setTab] = useState("presets"); // presets | custom
+
+  function applyPreset(key) {
+    const preset = THEME_PRESETS[key];
+    setActivePreset(key);
+    localStorage.setItem("krcf_theme_preset", key);
+    localStorage.setItem("krcf_theme", JSON.stringify(preset));
+    // Apply immediately
+    Object.assign(T, preset);
+    T.accentGlow = preset.accent + "20";
+    T.orange = preset.yellow;
+    window.location.reload();
+  }
+
+  function applyCustom() {
+    const theme = {...custom, accentGlow: custom.accent+"20", orange: custom.yellow};
+    localStorage.setItem("krcf_theme_preset", "custom");
+    localStorage.setItem("krcf_theme", JSON.stringify(theme));
+    Object.assign(T, theme);
+    window.location.reload();
+  }
+
+  const COLOR_FIELDS = [
+    {key:"bg",       label:"Fundo Principal",    desc:"Cor de fundo da tela"},
+    {key:"surface",  label:"Fundo Secundário",   desc:"Sidebar, cabeçalhos"},
+    {key:"card",     label:"Cards",              desc:"Fundo dos cartões"},
+    {key:"border",   label:"Bordas",             desc:"Linhas divisórias"},
+    {key:"accent",   label:"Destaque (Principal)",desc:"Botões, links, selecionados"},
+    {key:"green",    label:"Verde (Sucesso)",    desc:"Confirmações, fechados"},
+    {key:"red",      label:"Vermelho (Alerta)",  desc:"Erros, cancelados"},
+    {key:"yellow",   label:"Amarelo (Aviso)",    desc:"Atenção, pendentes"},
+    {key:"purple",   label:"Roxo",               desc:"Reuniões, premium"},
+    {key:"text",     label:"Texto Principal",    desc:"Títulos e textos"},
+    {key:"sub",      label:"Texto Secundário",   desc:"Labels e subtítulos"},
+    {key:"muted",    label:"Texto Suave",        desc:"Placeholders, metadados"},
+  ];
+
+  return (
+    <div>
+      <Card style={{marginBottom:14,background:T.accent+"0A",border:`1px solid ${T.accent}20`}}>
+        <div style={{fontSize:13,color:T.sub,lineHeight:1.7}}>
+          🎨 Personalize o visual do KR CALLFLOW. Escolha um tema pronto ou crie o seu próprio.<br/>
+          <strong style={{color:T.yellow}}>⚠️ A página será recarregada ao aplicar o tema.</strong>
+        </div>
+      </Card>
+
+      {/* Tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:16}}>
+        {[["presets","🎨 Temas Prontos"],["custom","🖌️ Personalizado"]].map(([k,v])=>(
+          <button key={k} onClick={()=>setTab(k)} style={{padding:"8px 16px",borderRadius:8,border:"none",background:tab===k?T.accent:T.surface,color:tab===k?"#fff":T.sub,fontWeight:600,fontSize:13,cursor:"pointer",fontFamily:"inherit"}}>
+            {v}
+          </button>
+        ))}
+      </div>
+
+      {tab==="presets" && (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+          {Object.entries(THEME_PRESETS).map(([key,preset])=>(
+            <div key={key} onClick={()=>applyPreset(key)} style={{
+              cursor:"pointer",borderRadius:12,overflow:"hidden",
+              border:`2px solid ${activePreset===key?T.accent:T.border}`,
+              transition:"all .2s",transform:activePreset===key?"scale(1.02)":"scale(1)"
+            }}>
+              {/* Preview */}
+              <div style={{background:preset.bg,padding:"14px 16px",height:80,position:"relative"}}>
+                <div style={{display:"flex",gap:6,marginBottom:8}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:preset.accent}}/>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:preset.green}}/>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:preset.red}}/>
+                </div>
+                <div style={{display:"flex",gap:8}}>
+                  <div style={{background:preset.surface,borderRadius:6,width:40,height:36}}/>
+                  <div style={{flex:1}}>
+                    <div style={{background:preset.card,borderRadius:6,height:14,marginBottom:4,border:`1px solid ${preset.border}`}}/>
+                    <div style={{background:preset.accent+"33",borderRadius:4,height:10,width:"60%"}}/>
+                  </div>
+                </div>
+                {activePreset===key&&<div style={{position:"absolute",top:8,right:8,background:T.green,borderRadius:"50%",width:18,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:"#fff",fontWeight:700}}>✓</div>}
+              </div>
+              <div style={{background:T.surface,padding:"10px 14px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <div style={{fontSize:13,fontWeight:600,color:T.text}}>{preset.label}</div>
+                {activePreset===key
+                  ?<span style={{fontSize:11,color:T.green,fontWeight:700}}>Ativo</span>
+                  :<span style={{fontSize:11,color:T.muted}}>Clique para aplicar</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab==="custom" && (
+        <Card>
+          <div style={{fontSize:13,fontWeight:700,color:T.sub,marginBottom:4}}>🖌️ Tema Personalizado</div>
+          <div style={{color:T.muted,fontSize:12,marginBottom:16}}>
+            Baseie-se em um tema existente ou crie do zero:
+            <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
+              {Object.entries(THEME_PRESETS).map(([k,p])=>(
+                <button key={k} onClick={()=>setCustom({...p})} style={{background:p.accent+"22",border:`1px solid ${p.accent}60`,color:p.accent,borderRadius:6,padding:"3px 10px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                  {p.label.split(" ")[0]} {k}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"0 20px"}}>
+            {COLOR_FIELDS.map(({key,label,desc})=>(
+              <div key={key} style={{marginBottom:14,display:"flex",alignItems:"center",gap:12}}>
+                <input type="color" value={custom[key]||"#000000"} onChange={e=>setCustom(c=>({...c,[key]:e.target.value}))}
+                  style={{width:40,height:40,borderRadius:8,border:`1px solid ${T.border}`,cursor:"pointer",flexShrink:0}}/>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:T.text}}>{label}</div>
+                  <div style={{fontSize:11,color:T.muted}}>{desc}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Preview */}
+          <div style={{background:custom.bg,borderRadius:10,padding:16,marginBottom:16,border:`1px solid ${custom.border}`}}>
+            <div style={{fontSize:12,fontWeight:600,color:custom.sub,marginBottom:10}}>👁️ Preview do tema</div>
+            <div style={{display:"flex",gap:10,marginBottom:10}}>
+              <div style={{background:custom.surface,borderRadius:8,padding:"8px 12px",flex:1,border:`1px solid ${custom.border}`}}>
+                <div style={{fontSize:11,color:custom.muted,marginBottom:3}}>Card Surface</div>
+                <div style={{fontSize:14,fontWeight:700,color:custom.text}}>Texto Principal</div>
+                <div style={{fontSize:12,color:custom.sub}}>Subtexto</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                <div style={{background:custom.accent,borderRadius:6,padding:"5px 12px",fontSize:11,color:"#fff",fontWeight:600}}>Botão Ação</div>
+                <div style={{background:custom.green,borderRadius:6,padding:"5px 12px",fontSize:11,color:"#fff",fontWeight:600}}>Sucesso</div>
+                <div style={{background:custom.red,borderRadius:6,padding:"5px 12px",fontSize:11,color:"#fff",fontWeight:600}}>Alerta</div>
+              </div>
+            </div>
+          </div>
+          <Btn onClick={applyCustom} style={{width:"100%",padding:"12px"}}>🎨 Aplicar Tema Personalizado</Btn>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+
 // ─── AI KEY EDITOR ───────────────────────────────────────────
 function AIKeyEditor() {
   const [key, setKey] = useState(() => localStorage.getItem("krcf_anthropic_key") || "");
@@ -1939,7 +2161,7 @@ function Settings({user,profiles,loadProfiles}){
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:24,flexWrap:"wrap"}}>
-        {[["users","👤 Usuários"],["segments","🗂 Segmentos"],["origins","🌐 Origens"],["statuses","🏷 Status"],["channels","📡 Canais"],["ai","🤖 IA"],["danger","⚠️ Sistema"]].map(([k,v])=><Btn key={k} variant={tab===k?"primary":"ghost"} onClick={()=>setTab(k)}>{v}</Btn>)}
+        {[["users","👤 Usuários"],["segments","🗂 Segmentos"],["origins","🌐 Origens"],["statuses","🏷 Status"],["channels","📡 Canais"],["ai","🤖 IA"],["theme","🎨 Visual"],["danger","⚠️ Sistema"]].map(([k,v])=><Btn key={k} variant={tab===k?"primary":"ghost"} onClick={()=>setTab(k)}>{v}</Btn>)}
       </div>
       {tab==="users"&&<>
         <div style={{display:"flex",justifyContent:"flex-end",marginBottom:16}}><Btn size="sm" onClick={()=>{setForm({name:"",email:"",password:"",role:"vendedor"});setModal(true);}}>+ Novo Usuário</Btn></div>
@@ -1959,6 +2181,7 @@ function Settings({user,profiles,loadProfiles}){
       {tab==="statuses"&&<StatusEditor/>}
       {tab==="channels"&&<ChannelEditor/>}
       {tab==="ai"&&<AIKeyEditor/>}
+      {tab==="theme"&&<ThemeEditor/>}
       {tab==="danger"&&<Card style={{border:`1px solid ${T.red}40`}}>
         <div style={{fontSize:15,fontWeight:700,color:T.red,marginBottom:8}}>⚠️ Zona de Perigo</div>
         <div style={{color:T.sub,fontSize:13,marginBottom:20}}>Estas ações são irreversíveis. Use com extremo cuidado.</div>
