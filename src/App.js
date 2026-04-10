@@ -336,54 +336,59 @@ function Dashboard({user,profiles,onNav}){
         <StatCard label="Follow-ups Pendentes" value={pendFU.length} color={pendFU.length>0?T.yellow:T.green} icon="⏰"/>
         <StatCard label="Nunca Acionados" value={neverContacted} color={neverContacted>0?T.red:T.green} icon="⚠️" sub="sem nenhum registro"/>
       </div>
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
-        <Card style={{flex:1,minWidth:140}}>
-          <div style={{fontSize:11,color:T.muted,marginBottom:6,fontWeight:600}}>🏢 Cliente da Base</div>
-          <div style={{display:"flex",gap:12,alignItems:"center"}}>
-            <div style={{textAlign:"center"}}>
+      {/* ROW 1: Acionamento metrics */}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
+        <StatCard label="Total Acionamentos" value={totalAcKeys.size} icon="🎯"/>
+        <StatCard label="Por Ligação" value={ligKeys.size} color={T.accent} icon="📞"/>
+        <StatCard label="Por WhatsApp" value={whaKeys.size} color={T.green} icon="💬"/>
+        <StatCard label="Conversão" value={`${convRate}%`} color={T.purple} icon="📈"/>
+        <StatCard label="Follow-ups" value={pendFU.length} color={pendFU.length>0?T.yellow:T.green} icon="⏰"/>
+        <StatCard label="Nunca Acionados" value={neverContacted} color={neverContacted>0?T.red:T.green} icon="⚠️"/>
+      </div>
+      {/* ROW 2: Status-based counting */}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:12}}>
+        <Card style={{flex:1,minWidth:180}}>
+          <div style={{fontSize:11,color:T.muted,marginBottom:8,fontWeight:600}}>🏢 CLIENTE DA BASE</div>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <div style={{textAlign:"center",minWidth:50}}>
               <div style={{fontSize:22,fontWeight:800,color:T.accent}}>{baseAcKeys.size}</div>
               <div style={{fontSize:10,color:T.muted}}>Acionados</div>
             </div>
-            <div style={{textAlign:"center"}}>
+            <div style={{textAlign:"center",minWidth:50}}>
               <div style={{fontSize:22,fontWeight:800,color:T.muted}}>{baseClientIds.size}</div>
-              <div style={{fontSize:10,color:T.muted}}>Total Base</div>
+              <div style={{fontSize:10,color:T.muted}}>Total</div>
             </div>
             <div style={{flex:1}}>
               <ProgressBar value={baseAcKeys.size} max={Math.max(baseClientIds.size,1)} color={T.accent}/>
-              <div style={{fontSize:10,color:T.muted,marginTop:3}}>{baseClientIds.size>0?Math.round((baseAcKeys.size/baseClientIds.size)*100):0}% acionados</div>
+              <div style={{fontSize:10,color:T.muted,marginTop:3}}>{baseClientIds.size>0?Math.round((baseAcKeys.size/baseClientIds.size)*100):0}%</div>
             </div>
           </div>
         </Card>
-        <Card style={{flex:1,minWidth:140}}>
-          <div style={{fontSize:11,color:T.muted,marginBottom:6,fontWeight:600}}>🎯 Prospecção</div>
-          <div style={{display:"flex",gap:12,alignItems:"center"}}>
-            <div style={{textAlign:"center"}}>
+        <Card style={{flex:1,minWidth:180}}>
+          <div style={{fontSize:11,color:T.muted,marginBottom:8,fontWeight:600}}>🎯 PROSPECÇÃO</div>
+          <div style={{display:"flex",gap:10,alignItems:"center"}}>
+            <div style={{textAlign:"center",minWidth:50}}>
               <div style={{fontSize:22,fontWeight:800,color:T.yellow}}>{prospAcKeys.size}</div>
               <div style={{fontSize:10,color:T.muted}}>Acionados</div>
             </div>
-            <div style={{textAlign:"center"}}>
+            <div style={{textAlign:"center",minWidth:50}}>
               <div style={{fontSize:22,fontWeight:800,color:T.muted}}>{prospClientIds.size}</div>
-              <div style={{fontSize:10,color:T.muted}}>Total Prosp.</div>
+              <div style={{fontSize:10,color:T.muted}}>Total</div>
             </div>
             <div style={{flex:1}}>
               <ProgressBar value={prospAcKeys.size} max={Math.max(prospClientIds.size,1)} color={T.yellow}/>
-              <div style={{fontSize:10,color:T.muted,marginTop:3}}>{prospClientIds.size>0?Math.round((prospAcKeys.size/prospClientIds.size)*100):0}% acionados</div>
+              <div style={{fontSize:10,color:T.muted,marginTop:3}}>{prospClientIds.size>0?Math.round((prospAcKeys.size/prospClientIds.size)*100):0}%</div>
             </div>
           </div>
         </Card>
-        <Card style={{flex:1,minWidth:140,textAlign:"center"}}>
-          <div style={{fontSize:11,color:T.muted,marginBottom:6,fontWeight:600}}>👥 Clientes</div>
-          <div style={{display:"flex",gap:10,justifyContent:"center"}}>
+        <Card style={{flex:1,minWidth:160,textAlign:"center"}}>
+          <div style={{fontSize:11,color:T.muted,marginBottom:8,fontWeight:600}}>👥 CLIENTES</div>
+          <div style={{display:"flex",gap:12,justifyContent:"center"}}>
             <div><div style={{fontSize:20,fontWeight:800,color:T.accent}}>{visibleClients.length}</div><div style={{fontSize:10,color:T.muted}}>Total</div></div>
             <div><div style={{fontSize:20,fontWeight:800,color:T.green}}>{acionadosCount}</div><div style={{fontSize:10,color:T.muted}}>Acionados</div></div>
             <div><div style={{fontSize:20,fontWeight:800,color:T.red}}>{neverContacted}</div><div style={{fontSize:10,color:T.muted}}>Nunca</div></div>
           </div>
         </Card>
-      </div>
-      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
-        <Card style={{flex:1,minWidth:120,textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:T.accent}}>{visibleClients.length}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>Total Clientes</div></Card>
-        <Card style={{flex:1,minWidth:120,textAlign:"center"}}><div style={{fontSize:22,fontWeight:800,color:T.green}}>{acionadosCount}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>Acionados (mês)</div></Card>
-        <Card style={{flex:1,minWidth:120,textAlign:"center",border:`1px solid ${T.yellow}30`}}><div style={{fontSize:22,fontWeight:800,color:T.yellow}}>{semAcionamento}</div><div style={{fontSize:10,color:T.muted,marginTop:3}}>Sem Acionamento</div></Card>
       </div>
       <div style={{marginBottom:12,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
         <div style={{fontSize:13,fontWeight:700,color:T.sub}}>🎯 Meta de Equipe</div>
@@ -3224,8 +3229,37 @@ const PT = {
   dashboard: "📊 Dashboard", clients: "👥 Clientes", acionamentos: "🎯 Acionamentos",
   followups: "⏰ Follow-ups", meetings: "📅 Reuniões",
   goals: "🎯 Metas", reports: "🤖 Relatórios IA", sales: "🧠 Técnicas de Venda",
-  settings: "⚙️ Configurações"
+  leads: "🗺 Pesquisa Leads", settings: "⚙️ Configurações"
 };
+
+// ─── ERROR BOUNDARY ─────────────────────────────────────────
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{minHeight:"100vh",background:"#0D0F14",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"sans-serif"}}>
+          <div style={{background:"#181C26",border:"1px solid #EF4444",borderRadius:16,padding:32,maxWidth:560,width:"95vw"}}>
+            <div style={{fontSize:32,marginBottom:12}}>⚠️</div>
+            <div style={{fontSize:18,fontWeight:700,color:"#F1F5F9",marginBottom:8}}>Erro no Sistema</div>
+            <div style={{color:"#94A3B8",fontSize:13,marginBottom:16,lineHeight:1.7}}>
+              {this.state.error?.message || "Erro desconhecido"}<br/><br/>
+              Verifique se:<br/>
+              • As credenciais Supabase estão corretas (linhas 10-11)<br/>
+              • A tabela <code style={{background:"#252A38",padding:"1px 6px",borderRadius:4}}>acionamentos</code> foi criada no Supabase<br/>
+              • O SQL <code style={{background:"#252A38",padding:"1px 6px",borderRadius:4}}>fix_constraints.sql</code> foi executado
+            </div>
+            <button onClick={()=>window.location.reload()} style={{background:"#3B82F6",border:"none",borderRadius:8,color:"#fff",padding:"10px 20px",fontSize:13,fontWeight:600,cursor:"pointer"}}>
+              🔄 Recarregar
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export default function App() {
   const [authUser, setAuthUser] = useState(null);
@@ -3304,6 +3338,7 @@ export default function App() {
   const preClient = quickTarget === page ? quickClient : null;
 
   return (
+    <ErrorBoundary>
     <ListsProvider>
       <div style={{ minHeight: "100vh", background: T.bg, fontFamily: "'DM Sans','Inter',system-ui,sans-serif", color: T.text, display: "flex" }}>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}} *{box-sizing:border-box}`}</style>
@@ -3402,5 +3437,6 @@ export default function App() {
         />
       </div>
     </ListsProvider>
+    </ErrorBoundary>
   );
 }
