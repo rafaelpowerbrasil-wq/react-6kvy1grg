@@ -17,7 +17,7 @@ const ANTHROPIC_KEY = "COLE_SUA_CHAVE_AQUI"; // ex: sk-ant-api03-...
 // ─────────────────────────────────────────────────────────────
 
 // ─── THEME ───────────────────────────────────────────────────
-const DEFAULT_T = {
+var DEFAULT_T = {
   bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
   accent:"#3B82F6",accentGlow:"#3B82F620",green:"#10B981",red:"#EF4444",
   yellow:"#F59E0B",orange:"#F59E0B",purple:"#8B5CF6",
@@ -33,7 +33,7 @@ function loadTheme() {
   } catch(e) {}
   return { ...DEFAULT_T };
 }
-const T = loadTheme();
+var T = loadTheme(); // var avoids TDZ in bundled output
 
 // ─── GLOBAL LISTS CONTEXT ────────────────────────────────────
 const ListsContext = React.createContext({ segments:[], origins:[], reload:()=>{} });
@@ -1951,10 +1951,6 @@ function ThemeEditor() {
     setActivePreset(key);
     localStorage.setItem("krcf_theme_preset", key);
     localStorage.setItem("krcf_theme", JSON.stringify(preset));
-    // Apply immediately
-    Object.assign(T, preset);
-    T.accentGlow = preset.accent + "20";
-    T.orange = preset.yellow;
     window.location.reload();
   }
 
@@ -1962,7 +1958,6 @@ function ThemeEditor() {
     const theme = {...custom, accentGlow: custom.accent+"20", orange: custom.yellow};
     localStorage.setItem("krcf_theme_preset", "custom");
     localStorage.setItem("krcf_theme", JSON.stringify(theme));
-    Object.assign(T, theme);
     window.location.reload();
   }
 
@@ -2097,8 +2092,8 @@ function AIKeyEditor() {
       setSaved(true); setTimeout(() => setSaved(false), 2500);
       return;
     }
-    if (!trimmed.startsWith("sk-ant-")) {
-      alert("A chave deve começar com 'sk-ant-'. Verifique se copiou corretamente.");
+    if (!trimmed.startsWith("sk-")) {
+      alert("A chave deve começar com 'sk-'. Verifique se copiou corretamente da console.anthropic.com");
       return;
     }
     localStorage.setItem("krcf_anthropic_key", trimmed);
@@ -2299,16 +2294,16 @@ const CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 // ─── AI CONFIG ───────────────────────────────────────────────
 async function callAI(prompt, maxTokens = 1000) {
-  // Use hardcoded key first, then localStorage fallback
-  const rawKey = (ANTHROPIC_KEY && ANTHROPIC_KEY !== "COLE_SUA_CHAVE_AQUI")
+  // Priority: hardcoded key > localStorage
+  const rawKey = (ANTHROPIC_KEY && ANTHROPIC_KEY !== "COLE_SUA_CHAVE_AQUI" && ANTHROPIC_KEY.trim().length > 20)
     ? ANTHROPIC_KEY
     : (localStorage.getItem("krcf_anthropic_key") || "");
   const key = rawKey.trim();
-  if (!key || key === "COLE_SUA_CHAVE_AQUI") {
-    throw new Error("Chave da Anthropic não configurada. Vá em Configurações > IA e cole sua chave sk-ant-...");
+  if (!key || key.length < 20) {
+    throw new Error("Chave da Anthropic não configurada. Vá em ⚙️ Configurações → 🤖 IA e cole sua chave.");
   }
-  if (!key.startsWith("sk-ant-")) {
-    throw new Error("Chave inválida. A chave deve começar com 'sk-ant-'. Verifique em Configurações > 🤖 IA");
+  if (!key.startsWith("sk-")) {
+    throw new Error("Chave inválida. Deve começar com 'sk-'. Verifique em ⚙️ Configurações → 🤖 IA");
   }
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
