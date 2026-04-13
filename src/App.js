@@ -106,7 +106,8 @@ const nowTime=()=>new Date().toTimeString().slice(0,5);
 function weekRange(){const n=new Date();const s=new Date(n);s.setDate(n.getDate()-n.getDay());const e=new Date(n);e.setDate(n.getDate()+(6-n.getDay()));return[s.toISOString().slice(0,10),e.toISOString().slice(0,10)];}
 
 // ─── UI PRIMITIVES ───────────────────────────────────────────
-function Badge({color=T.accent,children}){return<span style={{background:color+"22",color,border:`1px solid ${color}40`,borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>{children}</span>;}
+function Badge({color,children}){
+  color=color||T.accent;return<span style={{background:color+"22",color,border:`1px solid ${color}40`,borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>{children}</span>;}
 function Card({children,style}){return<div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:20,...style}}>{children}</div>;}
 function Btn({children,onClick,variant="primary",size="md",disabled,style,title}){
   const sz={sm:{padding:"5px 12px",fontSize:12},md:{padding:"9px 18px",fontSize:13},lg:{padding:"12px 28px",fontSize:15}};
@@ -138,7 +139,8 @@ function Modal({open,title,onClose,children,width=520}){
   );
 }
 function Spinner(){return<div style={{display:"flex",justifyContent:"center",padding:40}}><div style={{width:36,height:36,border:`3px solid ${T.border}`,borderTop:`3px solid ${T.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/></div>;}
-function StatCard({label,value,color=T.accent,icon}){
+function StatCard({label,value,color,icon,sub}){
+  color=color||T.accent;
   return(
     <Card style={{flex:1,minWidth:140}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -148,7 +150,8 @@ function StatCard({label,value,color=T.accent,icon}){
     </Card>
   );
 }
-function ProgressBar({value,max,color=T.accent}){
+function ProgressBar({value,max,color}){
+  color=color||T.accent;
   const pct=Math.min(100,max>0?(value/max)*100:0);
   return<div style={{background:T.border,borderRadius:99,height:8,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:pct>=100?T.green:pct>=70?color:T.yellow,borderRadius:99,transition:"width .4s"}}/></div>;
 }
