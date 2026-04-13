@@ -7,13 +7,13 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 // ============================================================
 
 // 1. SUPABASE — encontre em supabase.com > Settings > API
-const SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
-const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+var SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
+var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
+var supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─────────────────────────────────────────────────────────────
 // 2. ANTHROPIC IA — Cole SUA CHAVE entre as aspas na linha abaixo:
-const ANTHROPIC_KEY = "COLE_SUA_CHAVE_AQUI"; // ex: sk-ant-api03-...
+var ANTHROPIC_KEY = "COLE_SUA_CHAVE_AQUI"; // ex: sk-ant-api03-...
 // ─────────────────────────────────────────────────────────────
 
 // ─── THEME ───────────────────────────────────────────────────
@@ -34,7 +34,7 @@ var T = (function() {
 }());
 
 // ─── GLOBAL LISTS CONTEXT ────────────────────────────────────
-const ListsContext = React.createContext({ segments:[], origins:[], reload:()=>{} });
+var ListsContext = React.createContext({ segments:[], origins:[], reload:()=>{} });
 function useLists(){ return React.useContext(ListsContext); }
 function ListsProvider({ children }){
   const[segments,setSegments]=useState([]);
@@ -67,14 +67,14 @@ var STATUS_OPTIONS=(function(){try{return getStatusList().map(function(s){return
 function getStatusNames(){return getStatusList().map(s=>s.name);}
 function getStatusColor(name){try{var f=getStatusList().find(function(s){return s.name===name;});return(f&&f.color)||"#3B82F6";}catch(e){return"#3B82F6";}}
 var STATUS_COLORS=(function(){try{return Object.fromEntries(getStatusList().map(function(s){return[s.name,s.color];}));}catch(e){return{};}})();
-const CALL_TYPES=["Atendida","Não atendida","Caixa Postal"];
-const CALL_RESULTS=["Interesse","Sem interesse","Retornar"];
-const FOLLOWUP_TYPES=["Ligação","WhatsApp","Reunião"];
-const WHATS_TYPES=["Enviado","Recebido"];
-const MEETING_STATUS=["Agendada","Realizada","Cancelada","Reagendada"];
+var CALL_TYPES=["Atendida","Não atendida","Caixa Postal"];
+var CALL_RESULTS=["Interesse","Sem interesse","Retornar"];
+var FOLLOWUP_TYPES=["Ligação","WhatsApp","Reunião"];
+var WHATS_TYPES=["Enviado","Recebido"];
+var MEETING_STATUS=["Agendada","Realizada","Cancelada","Reagendada"];
 
-const today=()=>new Date().toISOString().slice(0,10);
-const toUpper=(s)=>(s||"").toUpperCase();
+var today=()=>new Date().toISOString().slice(0,10);
+var toUpper=(s)=>(s||"").toUpperCase();
 function getChannels(){
   try{const c=localStorage.getItem("krcf_channels");
     return c?JSON.parse(c):[
@@ -100,7 +100,7 @@ function maskCNPJ(v){
   if(n.length<=12) return n.slice(0,2)+"."+n.slice(2,5)+"."+n.slice(5,8)+"/"+n.slice(8);
   return n.slice(0,2)+"."+n.slice(2,5)+"."+n.slice(5,8)+"/"+n.slice(8,12)+"-"+n.slice(12);
 }
-const nowTime=()=>new Date().toTimeString().slice(0,5);
+var nowTime=()=>new Date().toTimeString().slice(0,5);
 function weekRange(){const n=new Date();const s=new Date(n);s.setDate(n.getDate()-n.getDay());const e=new Date(n);e.setDate(n.getDate()+(6-n.getDay()));return[s.toISOString().slice(0,10),e.toISOString().slice(0,10)];}
 
 // ─── UI PRIMITIVES ───────────────────────────────────────────
@@ -1898,7 +1898,7 @@ function ChannelEditor(){
 
 
 // ─── THEME PRESETS ───────────────────────────────────────────
-const THEME_PRESETS = {
+var THEME_PRESETS = {
   dark: {
     label:"🌙 Escuro (padrão)",
     bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
@@ -2290,8 +2290,8 @@ function Settings({user,profiles,loadProfiles}){
 
 
 // ─── CONSTANTES ADICIONAIS ───────────────────────────────────
-const PROPOSAL_STATUS = ["Em negociação","Proposta enviada","Proposta fechada","Proposta perdida","Aguardando retorno"];
-const CLAUDE_MODEL = "claude-sonnet-4-20250514";
+var PROPOSAL_STATUS = ["Em negociação","Proposta enviada","Proposta fechada","Proposta perdida","Aguardando retorno"];
+var CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 // ─── AI CONFIG ───────────────────────────────────────────────
 async function callAI(prompt, maxTokens = 1000) {
@@ -3208,7 +3208,7 @@ function LeadsSearch({ user }) {
 }
 
 // ─── MENU E APP ATUALIZADOS ───────────────────────────────────
-const MENU = [
+var MENU = [
   { id: "dashboard",    label: "Dashboard",        icon: "📊" },
   { id: "clients",      label: "Clientes",          icon: "👥" },
   { id: "acionamentos", label: "Acionamentos",      icon: "🎯" },
@@ -3221,7 +3221,7 @@ const MENU = [
   { id: "settings",  label: "Configurações",    icon: "⚙️" },
 ];
 
-const PT = {
+var PT = {
   dashboard: "📊 Dashboard", clients: "👥 Clientes", acionamentos: "🎯 Acionamentos",
   followups: "⏰ Follow-ups", meetings: "📅 Reuniões",
   goals: "🎯 Metas", reports: "🤖 Relatórios IA", sales: "🧠 Técnicas de Venda",
