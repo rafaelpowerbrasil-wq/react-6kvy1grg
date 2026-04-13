@@ -17,23 +17,21 @@ const ANTHROPIC_KEY = "COLE_SUA_CHAVE_AQUI"; // ex: sk-ant-api03-...
 // ─────────────────────────────────────────────────────────────
 
 // ─── THEME ───────────────────────────────────────────────────
-var DEFAULT_T = {
-  bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
-  accent:"#3B82F6",accentGlow:"#3B82F620",green:"#10B981",red:"#EF4444",
-  yellow:"#F59E0B",orange:"#F59E0B",purple:"#8B5CF6",
-  text:"#F1F5F9",muted:"#64748B",sub:"#94A3B8",
-};
-function loadTheme() {
+// Use a plain object literal - no function calls, no dependencies
+// This guarantees T is available immediately when the module loads
+var T = (function() {
+  var d = {
+    bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
+    accent:"#3B82F6",accentGlow:"#3B82F620",green:"#10B981",red:"#EF4444",
+    yellow:"#F59E0B",orange:"#F59E0B",purple:"#8B5CF6",
+    text:"#F1F5F9",muted:"#64748B",sub:"#94A3B8",
+  };
   try {
-    const saved = localStorage.getItem("krcf_theme");
-    if (saved) {
-      const t = JSON.parse(saved);
-      return { ...DEFAULT_T, ...t, accentGlow: (t.accent||DEFAULT_T.accent)+"20", orange: t.yellow||DEFAULT_T.yellow };
-    }
+    var s = localStorage.getItem("krcf_theme");
+    if (s) { var t = JSON.parse(s); return Object.assign({}, d, t, {accentGlow:(t.accent||d.accent)+"20",orange:t.yellow||d.yellow}); }
   } catch(e) {}
-  return { ...DEFAULT_T };
-}
-var T = loadTheme(); // var avoids TDZ in bundled output
+  return Object.assign({}, d);
+}());
 
 // ─── GLOBAL LISTS CONTEXT ────────────────────────────────────
 const ListsContext = React.createContext({ segments:[], origins:[], reload:()=>{} });
@@ -65,10 +63,10 @@ function getStatusList(){
     return [{name:"Lead",color:"#3B82F6"},{name:"Em contato",color:"#10B981"},{name:"Cliente da Base",color:"#3B82F6"},{name:"Prospecção",color:"#F59E0B"},{name:"Sem contato",color:"#64748B"},{name:"Whats",color:"#8B5CF6"},{name:"Caixa Postal",color:"#F59E0B"},{name:"Telefone não existe",color:"#EF4444"}];
   }catch{return [{name:"Lead",color:"#3B82F6"},{name:"Em contato",color:"#10B981"},{name:"Sem contato",color:"#64748B"}];}
 }
-const STATUS_OPTIONS=getStatusList().map(s=>s.name);
+var STATUS_OPTIONS=(function(){try{return getStatusList().map(function(s){return s.name;});}catch(e){return['Lead','Em contato','Sem contato'];}})();
 function getStatusNames(){return getStatusList().map(s=>s.name);}
-function getStatusColor(name){const f=getStatusList().find(s=>s.name===name);return f?.color||T.accent;}
-const STATUS_COLORS=Object.fromEntries(getStatusList().map(s=>[s.name,s.color]));
+function getStatusColor(name){try{var f=getStatusList().find(function(s){return s.name===name;});return(f&&f.color)||"#3B82F6";}catch(e){return"#3B82F6";}}
+var STATUS_COLORS=(function(){try{return Object.fromEntries(getStatusList().map(function(s){return[s.name,s.color];}));}catch(e){return{};}})();
 const CALL_TYPES=["Atendida","Não atendida","Caixa Postal"];
 const CALL_RESULTS=["Interesse","Sem interesse","Retornar"];
 const FOLLOWUP_TYPES=["Ligação","WhatsApp","Reunião"];
