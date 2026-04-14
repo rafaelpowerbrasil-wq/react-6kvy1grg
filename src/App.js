@@ -1,186 +1,271 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 
 // ============================================================
-//  ⚙️  CONFIGURAÇÃO — Substitua com suas credenciais
+//  ⚙️  CONFIGURAÇÃO
 // ============================================================
-
-// 1. SUPABASE — encontre em supabase.com > Settings > API
-var SUPABASE_URL = "https://xdnlowogfhwcrvwueups.supabase.co";
+// Linha 8: URL do Supabase
+var SUPABASE_URL = "https://SEU_PROJETO.supabase.co";
+// Linha 9: "https://xdnlowogfhwcrvwueups.supabase.co"  
 var SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhkbmxvd29nZmh3Y3J2d3VldXBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ1OTcxMzYsImV4cCI6MjA5MDE3MzEzNn0.EVybcOK9Y25sEyGpaZPSkRR7_UfNB21kPVwSNmWgvbY";
+// Linha 10: Chave Anthropic IA (ou configure em Configurações > IA)
+var ANTHROPIC_KEY = "sk-ant-api03-tV5...vwAA";
+
 var supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ─────────────────────────────────────────────────────────────
-// 2. ANTHROPIC IA — Cole SUA CHAVE entre as aspas na linha abaixo:
-var ANTHROPIC_KEY = "COLE_SUA_CHAVE_AQUI"; // ex: sk-ant-api03-...
-// ─────────────────────────────────────────────────────────────
-
-// ─── THEME ───────────────────────────────────────────────────
-// Use a plain object literal - no function calls, no dependencies
-// This guarantees T is available immediately when the module loads
+// ─── TEMA (IIFE - sem TDZ) ────────────────────────────────
 var T = (function() {
   var d = {
-    bg:"#0D0F14",surface:"#13161E",card:"#181C26",border:"#252A38",
-    accent:"#3B82F6",accentGlow:"#3B82F620",green:"#10B981",red:"#EF4444",
-    yellow:"#F59E0B",orange:"#F59E0B",purple:"#8B5CF6",
-    text:"#F1F5F9",muted:"#64748B",sub:"#94A3B8",
+    bg:"#0D0F14", surface:"#13161E", card:"#181C26", border:"#252A38",
+    accent:"#3B82F6", accentGlow:"#3B82F620", green:"#10B981", red:"#EF4444",
+    yellow:"#F59E0B", orange:"#F59E0B", purple:"#8B5CF6",
+    text:"#F1F5F9", muted:"#64748B", sub:"#94A3B8",
   };
   try {
-    var s = localStorage.getItem("krcf_theme");
-    if (s) { var t = JSON.parse(s); return Object.assign({}, d, t, {accentGlow:(t.accent||d.accent)+"20",orange:t.yellow||d.yellow}); }
-  } catch(e) {}
+    var saved = localStorage.getItem("krcf_theme");
+    if (saved) {
+      var parsed = JSON.parse(saved);
+      return Object.assign({}, d, parsed, {
+        accentGlow: (parsed.accent || d.accent) + "20",
+        orange: parsed.yellow || d.yellow
+      });
+    }
+  } catch(e2) {}
   return Object.assign({}, d);
 }());
 
-// ─── GLOBAL LISTS CONTEXT ────────────────────────────────────
-var ListsContext = React.createContext({ segments:[], origins:[], reload:()=>{} });
-function useLists(){ return React.useContext(ListsContext); }
-function ListsProvider({ children }){
-  const[segments,setSegments]=useState([]);
-  const[origins,setOrigins]=useState([]);
-  const reload=useCallback(async()=>{
-    const[s,o]=await Promise.all([supabase.from("segments").select("*").order("name"),supabase.from("origins").select("*").order("name")]);
-    const dbSegs=(s.data||[]).map(x=>x.name);
-    const dbOrigs=(o.data||[]).map(x=>x.name);
-    // Always include "Cliente da Base" in origins
-    const defaultOrigs=["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro","Cliente da Base","Pesquisa de Leads"];
-    const mergedOrigs=[...new Set([...dbOrigs,...defaultOrigs])];
-    setSegments(dbSegs.length>0?dbSegs:["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"]);
-    setOrigins(mergedOrigs);
-  },[]);
-  useEffect(()=>{reload();},[reload]);
-  return <ListsContext.Provider value={{segments,origins,reload}}>{children}</ListsContext.Provider>;
+// ─── HELPERS ─────────────────────────────────────────────
+function getTheme() { return T; }
+function today() { return new Date().toISOString().slice(0,10); }
+function nowTime() { return new Date().toTimeString().slice(0,5); }
+function toUpper(s) { return (s||"").toUpperCase(); }
+function weekRange() {
+  var n = new Date(), s = new Date(n), e = new Date(n);
+  s.setDate(n.getDate() - n.getDay());
+  e.setDate(n.getDate() + (6 - n.getDay()));
+  return [s.toISOString().slice(0,10), e.toISOString().slice(0,10)];
 }
-function getSegments(){return["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"];}
-function getOrigins(){return["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro","Cliente da Base"];}
-
-// Status system - supports objects {name,color} stored in localStorage
-function getStatusList(){
-  try{
-    const s=localStorage.getItem("krcf_statuses_v2");
-    if(s) return JSON.parse(s);
-    return [{name:"Lead",color:"#3B82F6"},{name:"Em contato",color:"#10B981"},{name:"Cliente da Base",color:"#3B82F6"},{name:"Prospecção",color:"#F59E0B"},{name:"Sem contato",color:"#64748B"},{name:"Whats",color:"#8B5CF6"},{name:"Caixa Postal",color:"#F59E0B"},{name:"Telefone não existe",color:"#EF4444"}];
-  }catch{return [{name:"Lead",color:"#3B82F6"},{name:"Em contato",color:"#10B981"},{name:"Sem contato",color:"#64748B"}];}
-}
-var STATUS_OPTIONS=(function(){try{return getStatusList().map(function(s){return s.name;});}catch(e){return['Lead','Em contato','Sem contato'];}})();
-function getStatusNames(){return getStatusList().map(s=>s.name);}
-function getStatusColor(name){try{var f=getStatusList().find(function(s){return s.name===name;});return(f&&f.color)||"#3B82F6";}catch(e){return"#3B82F6";}}
-var STATUS_COLORS=(function(){try{return Object.fromEntries(getStatusList().map(function(s){return[s.name,s.color];}));}catch(e){return{};}})();
-var CALL_TYPES=["Atendida","Não atendida","Caixa Postal"];
-var CALL_RESULTS=["Interesse","Sem interesse","Retornar"];
-var FOLLOWUP_TYPES=["Ligação","WhatsApp","Reunião"];
-var WHATS_TYPES=["Enviado","Recebido"];
-var MEETING_STATUS=["Agendada","Realizada","Cancelada","Reagendada"];
-
-var today=()=>new Date().toISOString().slice(0,10);
-var toUpper=(s)=>(s||"").toUpperCase();
-function getChannels(){
-  try{const c=localStorage.getItem("krcf_channels");
-    return c?JSON.parse(c):[
-      {name:"Ligação",code:"LIGACAO",icon:"📞",color:"#3B82F6"},
-      {name:"WhatsApp",code:"WHATSAPP",icon:"💬",color:"#10B981"}
-    ];
-  }catch{return [
-    {name:"Ligação",code:"LIGACAO",icon:"📞",color:"#3B82F6"},
-    {name:"WhatsApp",code:"WHATSAPP",icon:"💬",color:"#10B981"}
-  ];}
-}
-function maskCNPJ(v){
-  const n=v.replace(/[^\d]/g,"").slice(0,14);
-  if(n.length<=11){
-    if(n.length<=3) return n;
-    if(n.length<=6) return n.slice(0,3)+"."+n.slice(3);
-    if(n.length<=9) return n.slice(0,3)+"."+n.slice(3,6)+"."+n.slice(6);
-    return n.slice(0,3)+"."+n.slice(3,6)+"."+n.slice(6,9)+"-"+n.slice(9);
-  }
+function maskCNPJ(v) {
+  var n = v.replace(/[^\d]/g,"").slice(0,14);
   if(n.length<=2) return n;
   if(n.length<=5) return n.slice(0,2)+"."+n.slice(2);
   if(n.length<=8) return n.slice(0,2)+"."+n.slice(2,5)+"."+n.slice(5);
   if(n.length<=12) return n.slice(0,2)+"."+n.slice(2,5)+"."+n.slice(5,8)+"/"+n.slice(8);
   return n.slice(0,2)+"."+n.slice(2,5)+"."+n.slice(5,8)+"/"+n.slice(8,12)+"-"+n.slice(12);
 }
-var nowTime=()=>new Date().toTimeString().slice(0,5);
-function weekRange(){const n=new Date();const s=new Date(n);s.setDate(n.getDate()-n.getDay());const e=new Date(n);e.setDate(n.getDate()+(6-n.getDay()));return[s.toISOString().slice(0,10),e.toISOString().slice(0,10)];}
-
-// ─── UI PRIMITIVES ───────────────────────────────────────────
-function Badge({color,children}){
-  color=color||T.accent;return<span style={{background:color+"22",color,border:`1px solid ${color}40`,borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700}}>{children}</span>;}
-function Card({children,style}){return<div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:14,padding:20,...style}}>{children}</div>;}
-function Btn({children,onClick,variant="primary",size="md",disabled,style,title}){
-  const sz={sm:{padding:"5px 12px",fontSize:12},md:{padding:"9px 18px",fontSize:13},lg:{padding:"12px 28px",fontSize:15}};
-  const vr={primary:{background:T.accent,color:"#fff"},ghost:{background:"transparent",color:T.sub,border:`1px solid ${T.border}`},danger:{background:T.red,color:"#fff"},success:{background:T.green,color:"#fff"}};
-  return<button title={title} style={{border:"none",borderRadius:8,cursor:disabled?"not-allowed":"pointer",fontFamily:"inherit",fontWeight:600,transition:"all .15s",opacity:disabled?0.5:1,...sz[size],...vr[variant],...style}} onClick={onClick} disabled={disabled}>{children}</button>;
+function getStatusList() {
+  try {
+    var s = localStorage.getItem("krcf_statuses_v2");
+    if(s) return JSON.parse(s);
+  } catch(e3) {}
+  return [
+    {name:"Lead",color:"#3B82F6"},{name:"Em contato",color:"#10B981"},
+    {name:"Cliente da Base",color:"#3B82F6"},{name:"Prospecção",color:"#F59E0B"},
+    {name:"Sem contato",color:"#64748B"},{name:"Whats",color:"#8B5CF6"},
+    {name:"Caixa Postal",color:"#F59E0B"},{name:"Telefone não existe",color:"#EF4444"},
+  ];
 }
-function Input({label,value,onChange,type="text",options,style,required,placeholder,min,max}){
-  const s={background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,padding:"8px 12px",fontSize:13,width:"100%",fontFamily:"inherit",outline:"none",boxSizing:"border-box",...style};
-  return(
-    <div style={{marginBottom:14}}>
-      {label&&<div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>{label}{required&&<span style={{color:T.red}}> *</span>}</div>}
-      {options?<select style={s} value={value} onChange={e=>onChange(e.target.value)}><option value="">Selecione...</option>{options.map(o=><option key={o} value={o}>{o}</option>)}</select>
-      :<input style={s} type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} min={min} max={max}/>}
+function getStatusNames() { return getStatusList().map(function(s){return s.name;}); }
+function getStatusColor(name) {
+  var list = getStatusList();
+  for(var i=0;i<list.length;i++) { if(list[i].name===name) return list[i].color; }
+  return "#3B82F6";
+}
+function getChannels() {
+  try {
+    var c = localStorage.getItem("krcf_channels");
+    if(c) return JSON.parse(c);
+  } catch(e4) {}
+  return [
+    {name:"Ligação",code:"LIGACAO",icon:"📞",color:"#3B82F6"},
+    {name:"WhatsApp",code:"WHATSAPP",icon:"💬",color:"#10B981"},
+  ];
+}
+function getSegments() {
+  try { var s=localStorage.getItem("krcf_segments"); if(s) return JSON.parse(s); } catch(e5) {}
+  return ["Varejo","Indústria","Serviços","Tecnologia","Saúde","Educação","Agronegócio","Outro"];
+}
+function getOrigins() {
+  try { var s=localStorage.getItem("krcf_origins"); if(s) return JSON.parse(s); } catch(e6) {}
+  return ["Lead","Indicação","Prospecção ativa","Site","Evento","Parceiro","Cliente da Base","Pesquisa de Leads"];
+}
+
+async function callAI(prompt, maxTokens) {
+  maxTokens = maxTokens || 1000;
+  var rawKey = (ANTHROPIC_KEY && ANTHROPIC_KEY !== "COLE_SUA_CHAVE_AQUI")
+    ? ANTHROPIC_KEY
+    : (localStorage.getItem("krcf_anthropic_key") || "");
+  var key = rawKey.trim();
+  if(!key || key.length < 20) throw new Error("IA não configurada. Vá em Configurações → 🤖 IA");
+  var r = await fetch("https://api.anthropic.com/v1/messages", {
+    method:"POST",
+    headers:{
+      "Content-Type":"application/json",
+      "x-api-key":key,
+      "anthropic-version":"2023-06-01",
+      "anthropic-dangerous-direct-browser-access":"true"
+    },
+    body:JSON.stringify({
+      model:"claude-haiku-4-5-20251001",
+      max_tokens:maxTokens,
+      messages:[{role:"user",content:prompt}]
+    })
+  });
+  if(!r.ok) {
+    var err = await r.json();
+    throw new Error(err.error && err.error.message ? err.error.message : "Erro "+r.status);
+  }
+  var data = await r.json();
+  return (data.content||[]).map(function(i){return i.text||"";}).join("\n");
+}
+
+// ─── UI PRIMITIVES ───────────────────────────────────────
+function Spinner() {
+  return React.createElement("div",{style:{display:"flex",justifyContent:"center",padding:40}},
+    React.createElement("div",{style:{width:36,height:36,border:"3px solid "+T.border,borderTop:"3px solid "+T.accent,borderRadius:"50%",animation:"spin 0.8s linear infinite"}})
+  );
+}
+
+function Badge(props) {
+  var color = props.color || T.accent;
+  return (
+    <span style={{background:color+"22",color:color,border:"1px solid "+color+"40",borderRadius:6,padding:"2px 10px",fontSize:11,fontWeight:700,display:"inline-block"}}>
+      {props.children}
+    </span>
+  );
+}
+
+function Card(props) {
+  return (
+    <div style={Object.assign({background:T.card,border:"1px solid "+T.border,borderRadius:14,padding:20},props.style||{})}>
+      {props.children}
     </div>
   );
 }
-function Modal({open,title,onClose,children,width=520}){
-  if(!open)return null;
-  return(
-    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={onClose}>
-      <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:16,padding:28,width,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <span style={{fontSize:17,fontWeight:700,color:T.text}}>{title}</span>
-          <button onClick={onClose} style={{background:"none",border:"none",color:T.muted,fontSize:22,cursor:"pointer"}}>×</button>
+
+function Btn(props) {
+  var variant = props.variant || "primary";
+  var size = props.size || "md";
+  var pads = {sm:"5px 12px",md:"9px 18px",lg:"12px 28px"};
+  var fonts = {sm:12,md:13,lg:15};
+  var bgs = {
+    primary:T.accent, ghost:"transparent", danger:T.red,
+    success:T.green, warning:T.yellow,
+  };
+  var colors = {primary:"#fff",ghost:T.sub,danger:"#fff",success:"#fff",warning:"#000"};
+  var borders = {ghost:"1px solid "+T.border};
+  return (
+    <button
+      title={props.title}
+      disabled={!!props.disabled}
+      onClick={props.onClick}
+      style={Object.assign({
+        border:borders[variant]||"none",
+        borderRadius:8,cursor:props.disabled?"not-allowed":"pointer",
+        fontFamily:"inherit",fontWeight:600,transition:"all .15s",
+        opacity:props.disabled?0.5:1,
+        padding:pads[size],fontSize:fonts[size],
+        background:bgs[variant],color:colors[variant],
+      },props.style||{})}
+    >{props.children}</button>
+  );
+}
+
+function Input(props) {
+  var style = Object.assign({
+    background:T.surface,border:"1px solid "+T.border,borderRadius:8,
+    color:T.text,padding:"8px 12px",fontSize:13,width:"100%",
+    fontFamily:"inherit",outline:"none",boxSizing:"border-box",
+  }, props.style||{});
+  return (
+    <div style={{marginBottom:14}}>
+      {props.label && (
+        <div style={{color:T.sub,fontSize:12,marginBottom:5,fontWeight:600}}>
+          {props.label}{props.required && <span style={{color:T.red}}> *</span>}
         </div>
-        {children}
+      )}
+      {props.options ? (
+        <select style={style} value={props.value} onChange={function(e){props.onChange(e.target.value);}}>
+          <option value="">Selecione...</option>
+          {props.options.map(function(o){return <option key={o} value={o}>{o}</option>;})}
+        </select>
+      ) : (
+        <input style={style} type={props.type||"text"} value={props.value}
+          onChange={function(e){props.onChange(e.target.value);}}
+          placeholder={props.placeholder} min={props.min} max={props.max}/>
+      )}
+    </div>
+  );
+}
+
+function Modal(props) {
+  if(!props.open) return null;
+  var width = props.width || 520;
+  return (
+    <div style={{position:"fixed",inset:0,background:"#00000090",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}
+      onClick={props.onClose}>
+      <div style={{background:T.card,border:"1px solid "+T.border,borderRadius:16,padding:28,width:width,maxWidth:"95vw",maxHeight:"90vh",overflowY:"auto"}}
+        onClick={function(e){e.stopPropagation();}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <span style={{fontSize:17,fontWeight:700,color:T.text}}>{props.title}</span>
+          <button onClick={props.onClose} style={{background:"none",border:"none",color:T.muted,fontSize:22,cursor:"pointer"}}>×</button>
+        </div>
+        {props.children}
       </div>
     </div>
   );
 }
-function Spinner(){return<div style={{display:"flex",justifyContent:"center",padding:40}}><div style={{width:36,height:36,border:`3px solid ${T.border}`,borderTop:`3px solid ${T.accent}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/></div>;}
-function StatCard({label,value,color,icon,sub}){
-  color=color||T.accent;
-  return(
-    <Card style={{flex:1,minWidth:140}}>
+
+function StatCard(props) {
+  var color = props.color || T.accent;
+  return (
+    <Card style={{flex:1,minWidth:130}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-        <div><div style={{color:T.muted,fontSize:10,fontWeight:600,marginBottom:6}}>{label}</div><div style={{fontSize:26,fontWeight:800,color}}>{value}</div></div>
-        {icon&&<span style={{fontSize:20,opacity:.7}}>{icon}</span>}
+        <div>
+          <div style={{color:T.muted,fontSize:10,fontWeight:600,marginBottom:5}}>{props.label}</div>
+          <div style={{fontSize:24,fontWeight:800,color:color}}>{props.value}</div>
+          {props.sub && <div style={{color:T.muted,fontSize:10,marginTop:3}}>{props.sub}</div>}
+        </div>
+        {props.icon && <span style={{fontSize:20,opacity:.7}}>{props.icon}</span>}
       </div>
     </Card>
   );
 }
-function ProgressBar({value,max,color}){
-  color=color||T.accent;
-  const pct=Math.min(100,max>0?(value/max)*100:0);
-  return<div style={{background:T.border,borderRadius:99,height:8,overflow:"hidden"}}><div style={{width:`${pct}%`,height:"100%",background:pct>=100?T.green:pct>=70?color:T.yellow,borderRadius:99,transition:"width .4s"}}/></div>;
-}
-function DonutRing({real,meta,color,size=110}){
-  const pct=meta>0?Math.min(100,(real/meta)*100):0;
-  const r=(size/2)-10,circ=2*Math.PI*r,dash=(pct/100)*circ;
-  return(
-    <div style={{position:"relative",width:size,height:size,flexShrink:0}}>
-      <svg width={size} height={size} style={{transform:"rotate(-90deg)"}}>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={T.border} strokeWidth={10}/>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={10} strokeDasharray={`${dash} ${circ}`} strokeLinecap="round" style={{transition:"stroke-dasharray .5s ease"}}/>
-      </svg>
-      <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center"}}>
-        <span style={{fontSize:size>100?18:14,fontWeight:800,color:pct>=100?T.green:T.text}}>{Math.round(pct)}%</span>
-        <span style={{fontSize:10,color:T.muted,marginTop:1}}>{real}/{meta}</span>
-      </div>
+
+function ProgressBar(props) {
+  var color = props.color || T.accent;
+  var max = props.max || 1;
+  var pct = Math.min(100, max > 0 ? (props.value / max) * 100 : 0);
+  return (
+    <div style={{background:T.border,borderRadius:99,height:8,overflow:"hidden"}}>
+      <div style={{width:pct+"%",height:"100%",background:pct>=100?T.green:pct>=70?color:T.yellow,borderRadius:99,transition:"width .4s"}}/>
     </div>
   );
 }
-function ThFilter({label,value,onChange,options}){
-  return(
-    <th style={{padding:"10px 12px",textAlign:"left",color:T.muted,fontWeight:600,fontSize:11,borderBottom:`1px solid ${T.border}`,background:T.surface}}>
-      <div style={{marginBottom:4}}>{label}</div>
-      {options&&<select value={value} onChange={e=>onChange(e.target.value)} style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.sub,padding:"3px 6px",fontSize:10,fontFamily:"inherit",width:"100%"}}>
-        <option value="">Todos</option>{options.map(o=><option key={o} value={o}>{o}</option>)}
-      </select>}
-    </th>
-  );
+
+// ─── LISTS CONTEXT ───────────────────────────────────────
+var ListsContext = React.createContext({segments:[],origins:[],reload:function(){}});
+function useLists() { return React.useContext(ListsContext); }
+function ListsProvider(props) {
+  var _s = useState(getSegments()), segments = _s[0], setSegments = _s[1];
+  var _o = useState(getOrigins()), origins = _o[0], setOrigins = _o[1];
+  var reload = useCallback(async function() {
+    try {
+      var results = await Promise.all([
+        supabase.from("segments").select("*").order("name"),
+        supabase.from("origins").select("*").order("name"),
+      ]);
+      if(results[0].data && results[0].data.length) setSegments(results[0].data.map(function(x){return x.name;}));
+      if(results[1].data && results[1].data.length) setOrigins(results[1].data.map(function(x){return x.name;}));
+    } catch(e) {}
+  },[]);
+  useEffect(function(){reload();},[reload]);
+  return <ListsContext.Provider value={{segments:segments,origins:origins,reload:reload}}>{props.children}</ListsContext.Provider>;
 }
 
-// ─── LOGIN ───────────────────────────────────────────────────
+
+
 function Login({onLogin}){
   const[email,setEmail]=useState("");const[pass,setPass]=useState("");
   const[err,setErr]=useState("");const[loading,setLoading]=useState(false);const[mode,setMode]=useState("login");
@@ -2294,39 +2379,6 @@ var PROPOSAL_STATUS = ["Em negociação","Proposta enviada","Proposta fechada","
 var CLAUDE_MODEL = "claude-sonnet-4-20250514";
 
 // ─── AI CONFIG ───────────────────────────────────────────────
-async function callAI(prompt, maxTokens = 1000) {
-  // Priority: hardcoded key > localStorage
-  const rawKey = (ANTHROPIC_KEY && ANTHROPIC_KEY !== "COLE_SUA_CHAVE_AQUI" && ANTHROPIC_KEY.trim().length > 20)
-    ? ANTHROPIC_KEY
-    : (localStorage.getItem("krcf_anthropic_key") || "");
-  const key = rawKey.trim();
-  if (!key || key.length < 20) {
-    throw new Error("Chave da Anthropic não configurada. Vá em ⚙️ Configurações → 🤖 IA e cole sua chave.");
-  }
-  if (!key.startsWith("sk-")) {
-    throw new Error("Chave inválida. Deve começar com 'sk-'. Verifique em ⚙️ Configurações → 🤖 IA");
-  }
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-      "anthropic-dangerous-direct-browser-access": "true"
-    },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: maxTokens,
-      messages: [{ role: "user", content: prompt }]
-    })
-  });
-  if (!r.ok) {
-    const e = await r.json();
-    throw new Error(e.error?.message || "Erro " + r.status);
-  }
-  const d = await r.json();
-  return d.content?.map(i => i.text || "").join("\n") || "";
-}
 
 // ─── HOOK: NOTIFICAÇÕES 15min ────────────────────────────────
 function useAlerts(user) {
